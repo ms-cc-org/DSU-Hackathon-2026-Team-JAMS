@@ -1,18 +1,21 @@
 // Every layer the map can be colored or raised by. A layer reads one value per county for a crop and season.
 import { divBins, seqBins, zeroBins, type Bin } from './bins';
-import { RAMP, SEVERITY, SEVERITY_SHORT, USDM } from './colors';
+import { NEUTRAL, RAMP, SEVERITY, SEVERITY_SHORT, USDM } from './colors';
 import { CROP_NAME, MAX_WEEKS } from './constants';
-import { dayOfYear, num, pct, plural, thousands } from './format';
+import { dayOfYear, num, pct, plural, signed, thousands } from './format';
+import { DAMAGING, money, stormSeason } from './storms';
+import { dayValue, droughtOn, normalValue, seasonToDate, type DayContext } from './daily';
 import type { County, CropKey, SeriesField } from './types';
 
-export type CategoryId = 'crops' | 'drought' | 'weather' | 'land' | 'sat';
-export type MetricKind = 'yield' | 'season' | 'soil' | 'irrigation' | 'satellite';
+export type CategoryId = 'crops' | 'drought' | 'weather' | 'storms' | 'land' | 'sat';
+export type MetricKind = 'daily' | 'yield' | 'season' | 'derived' | 'freeze' | 'storm' | 'soil' | 'irrigation' | 'satellite';
 
 /** Category colors come from a validated categorical palette and always appear with a label and icon. */
 export const CATEGORIES: Record<CategoryId, { name: string; color: string }> = {
   crops: { name: 'Crops', color: 'var(--cat-crops)' },
   drought: { name: 'Drought', color: 'var(--cat-drought)' },
   weather: { name: 'Weather', color: 'var(--cat-weather)' },
+  storms: { name: 'Storms', color: 'var(--cat-storms)' },
   land: { name: 'Land & water', color: 'var(--cat-land)' },
   sat: { name: 'Satellite', color: 'var(--cat-sat)' },
 };
@@ -27,7 +30,8 @@ export interface Metric {
   worse: 'low' | 'high' | null;
   /** Soil layers don't change by season. */
   fixed?: boolean;
-  get: (c: County, k: CropKey, i: number) => number | null;
+  /** i is the season-year index; t is the selected date, which day-by-day layers read. */
+  get: (c: County, k: CropKey, i: number, t?: DayContext) => number | null;
   bins: (k: CropKey) => Bin[];
   format: (v: number) => string;
   short: (v: number) => string;
@@ -51,6 +55,13 @@ const RAIN_CUTS: Record<CropKey, number[]> = { C: [250, 375, 500, 625], S: [350,
 const TEMP_CUTS: Record<CropKey, number[]> = { C: [19, 20, 21, 22], S: [17.5, 18.5, 19.5, 20.5], W: [6, 7.5, 9, 12], G: [18.5, 19.5, 20.5, 21.5] };
 const GDD_CUTS: Record<CropKey, number[]> = { C: [1450, 1550, 1650, 1750], S: [1575, 1675, 1775, 1875], W: [2600, 2800, 3100, 3600], G: [1500, 1600, 1700, 1850] };
 
+const FIRST_YEAR = 2000;
+/** A crop-season measure derived from daily weather; available for every county, crops or not. */
+const derived = (c: County, k: CropKey, i: number, f: 'hn' | 'fh' | 'dry' | 'hr') => c.sw?.[k]?.[f][i] ?? null;
+const storm = (c: County, k: CropKey, i: number) => stormSeason(c, k, FIRST_YEAR + i);
+const stormBins = (cuts: number[]) => zeroBins(cuts, RAMP.purple.slice(0, 4), String);
+const rainBins = (cuts: number[]) => [{ color: NEUTRAL, test: (v: number) => v < 0.3, label: 'No rain' }, ...seqBins(cuts, RAMP.blue.slice(0, 4), v => `${v} mm`)];
+
 const production = (c: County, k: CropKey, i: number) => {
   const y = reported(c, k, i, 'y'), a = reported(c, k, i, 'ah');
   return y != null && a != null ? (y * a) / 1e6 : null;
@@ -58,6 +69,80 @@ const production = (c: County, k: CropKey, i: number) => {
 const millions = (v: number) => (v < 1 ? v.toFixed(2) : v.toFixed(1));
 
 export const METRICS = {
+  // ---- On the selected date (daily weather, weekly drought, dated storm reports) ----
+  dHighAnom: {
+    cat: 'weather', name: 'High vs normal', unit: '°C above or below the normal high for this date', kind: 'daily', worse: 'high',
+    get: (c, _k, _i, t) => { const v = dayValue(t, 'tmax', c), n = normalValue(t, 'tmax', c); return v == null || n == null ? null : v - n; },
+    bins: () => divBins([2, 5, 9], RAMP.divBlue, RAMP.divRed, v => `${signed(v)} °C`),
+    format: v => `${signed(v, 1)} °C vs normal`, short: v => `${signed(v)} °C`,
+  },
+  dTmax: {
+    cat: 'weather', name: 'Daily high', unit: '°C, highest temperature of the day', kind: 'daily', worse: 'high',
+    get: (c, _k, _i, t) => dayValue(t, 'tmax', c),
+    bins: () => seqBins([0, 10, 20, 30], RAMP.red, v => `${v} °C`),
+    format: v => `High ${num(v, 1)} °C`, short: v => `${num(v)} °C`,
+  },
+  dTmin: {
+    cat: 'weather', name: 'Daily low', unit: '°C, lowest temperature of the day', kind: 'daily', worse: null,
+    get: (c, _k, _i, t) => dayValue(t, 'tmin', c),
+    bins: () => seqBins([-10, 0, 10, 20], RAMP.teal, v => `${v} °C`),
+    format: v => `Low ${num(v, 1)} °C`, short: v => `${num(v)} °C`,
+  },
+  dRain: {
+    cat: 'weather', name: 'Rain that day', unit: 'mm of rain on this date', kind: 'daily', worse: null,
+    get: (c, _k, _i, t) => dayValue(t, 'pcpn', c),
+    bins: () => rainBins([5, 15, 30]),
+    format: v => (v < 0.3 ? 'No rain' : `${num(v, 1)} mm of rain`), short: v => `${num(v, 1)} mm`,
+  },
+  dRain7: {
+    cat: 'weather', name: 'Rain, last 7 days', unit: 'mm of rain in the 7 days up to this date', kind: 'daily', worse: null,
+    get: (c, _k, _i, t) => dayValue(t, 'rain7', c),
+    bins: () => rainBins([10, 25, 50]),
+    format: v => `${num(v, 1)} mm in 7 days`, short: v => `${num(v)} mm`,
+  },
+  dRain30Anom: {
+    cat: 'weather', name: 'Rain vs normal, last 30 days', unit: '% above or below the normal 30-day rain for this date', kind: 'daily', worse: 'low',
+    get: (c, _k, _i, t) => { const v = dayValue(t, 'rain30', c), n = normalValue(t, 'rain30', c); return v == null || n == null || n < 5 ? null : ((v - n) / n) * 100; },
+    bins: () => divBins([15, 35, 60], RAMP.divDry, RAMP.divWet, v => pct(v)),
+    format: v => `${pct(v)} vs normal (30 days)`, short: v => pct(v),
+  },
+  dDry: {
+    cat: 'weather', name: 'Days since rain', unit: 'days since the last day with 2.5 mm of rain or more', kind: 'daily', worse: 'high',
+    get: (c, _k, _i, t) => dayValue(t, 'dry', c),
+    bins: () => seqBins([7, 14, 21, 30], RAMP.brown, String, true),
+    format: v => (v === 0 ? 'Rained today' : `${plural(v, 'day')} since rain`), short: String,
+  },
+  dGdd: {
+    cat: 'weather', name: 'Heat units so far', unit: 'growing degree days from the start of the season to this date', kind: 'daily', worse: null,
+    get: (c, k, _i, t) => seasonToDate(t, c, k, 'gdd'),
+    bins: () => seqBins([300, 700, 1100, 1500], RAMP.green, v => num(v)),
+    format: v => `${num(v)} GDD so far`, short: v => num(v),
+  },
+  dHot: {
+    cat: 'weather', name: 'Hot days so far', unit: 'days at 35 °C or hotter from the start of the season to this date', kind: 'daily', worse: 'high',
+    get: (c, k, _i, t) => seasonToDate(t, c, k, 'hot'),
+    bins: () => zeroBins([3, 7, 14], RAMP.red.slice(0, 4), String),
+    format: v => `${plural(v, 'hot day')} so far`, short: String,
+  },
+  dSev: {
+    cat: 'drought', name: 'Drought level this week', unit: 'Drought Monitor map in effect on this date', kind: 'daily', worse: 'high',
+    get: (c, _k, _i, t) => (t ? droughtOn(c, t.day)?.cat ?? null : null),
+    bins: () => USDM.map((color, n) => ({ color, label: SEVERITY[n], test: (v: number) => v <= n })),
+    format: v => SEVERITY[v], short: v => SEVERITY_SHORT[v],
+  },
+  dDsci: {
+    cat: 'drought', name: 'Drought intensity this week', unit: 'DSCI on the map in effect on this date, 0 to 500', kind: 'daily', worse: 'high',
+    get: (c, _k, _i, t) => (t ? droughtOn(c, t.day)?.dsci ?? null : null),
+    bins: () => zeroBins([50, 100, 200], RAMP.orange.slice(0, 4), String),
+    format: v => `DSCI ${v}`, short: String,
+  },
+  dStorms7: {
+    cat: 'storms', name: 'Storms, last 7 days', unit: 'hail, wind, tornado and flood reports in the 7 days up to this date', kind: 'daily', worse: 'high',
+    get: (c, _k, _i, t) => (t ? (c.ev ?? []).filter(e => e[0] <= t.day && e[0] > t.day - 7 && DAMAGING.includes(e[1])).length : null),
+    bins: () => stormBins([2, 4, 8]),
+    format: v => plural(v, 'storm report'), short: String,
+  },
+  // ---- Season and yearly layers ----
   anom: {
     cat: 'crops', name: 'Yield vs trend', unit: '% above or below the county trend', kind: 'yield', worse: 'low',
     get: (c, k, i) => reported(c, k, i, 'a'),
@@ -130,6 +215,90 @@ export const METRICS = {
     bins: k => seqBins(GDD_CUTS[k], RAMP.red, v => num(v)),
     format: v => `${num(v)} GDD`, short: v => num(v),
   },
+  hotNights: {
+    cat: 'weather', name: 'Hot nights', unit: 'nights with a low of 22 °C or warmer, growing season', kind: 'derived', worse: 'high',
+    get: (c, k, i) => derived(c, k, i, 'hn'),
+    bins: () => zeroBins([5, 10, 20], RAMP.orange.slice(0, 4), String),
+    format: v => plural(v, 'hot night'), short: String,
+  },
+  floweringHeat: {
+    cat: 'weather', name: 'Heat at flowering', unit: 'days at 32 °C or hotter in the flowering month', kind: 'derived', worse: 'high',
+    get: (c, k, i) => derived(c, k, i, 'fh'),
+    bins: () => zeroBins([4, 8, 15], RAMP.red.slice(0, 4), String),
+    format: v => `${plural(v, 'day')} ≥ 32 °C at flowering`, short: String,
+  },
+  drySpell: {
+    cat: 'weather', name: 'Longest dry spell', unit: 'days in a row with under 1 mm of rain', kind: 'derived', worse: 'high',
+    get: (c, k, i) => derived(c, k, i, 'dry'),
+    bins: () => seqBins([10, 15, 21, 30], RAMP.brown, String, true),
+    format: v => `${plural(v, 'day')} without rain`, short: String,
+  },
+  heavyRain: {
+    cat: 'weather', name: 'Heavy rain days', unit: 'days with 25 mm of rain or more, growing season', kind: 'derived', worse: 'high',
+    get: (c, k, i) => derived(c, k, i, 'hr'),
+    bins: () => zeroBins([2, 4, 6], RAMP.blue.slice(0, 4), String),
+    format: v => plural(v, 'heavy rain day'), short: String,
+  },
+  springRain: {
+    cat: 'weather', name: 'Spring rain', unit: 'mm in April and May (planting season)', kind: 'freeze', worse: null,
+    get: (c, _k, i) => c.fz?.sr[i] ?? null,
+    bins: () => seqBins([100, 150, 200, 250], RAMP.blue, String),
+    format: v => `${num(v)} mm in Apr–May`, short: v => num(v),
+  },
+  lastFreeze: {
+    cat: 'weather', name: 'Last spring freeze', unit: 'last night at 0 °C or colder before August', kind: 'freeze', worse: 'high',
+    get: (c, _k, i) => c.fz?.ls[i] ?? null,
+    bins: () => seqBins([91, 105, 121, 135], RAMP.teal, dayOfYear),
+    format: dayOfYear, short: dayOfYear,
+  },
+  firstFreeze: {
+    cat: 'weather', name: 'First fall freeze', unit: 'first night at 0 °C or colder from August on', kind: 'freeze', worse: 'low',
+    get: (c, _k, i) => c.fz?.ff[i] ?? null,
+    bins: () => seqBins([274, 288, 305, 320], RAMP.teal, dayOfYear),
+    format: dayOfYear, short: dayOfYear,
+  },
+  frostFree: {
+    cat: 'weather', name: 'Frost-free days', unit: 'days between the last spring and first fall freeze', kind: 'freeze', worse: 'low',
+    get: (c, _k, i) => { const f = c.fz; return f && f.ls[i] != null && f.ff[i] != null ? f.ff[i]! - f.ls[i]! : null; },
+    bins: () => seqBins([150, 170, 190, 210], RAMP.green, String),
+    format: v => plural(v, 'frost-free day'), short: String,
+  },
+  storms: {
+    cat: 'storms', name: 'Damaging storms', unit: 'reported hail, wind, tornado and flood events, growing season', kind: 'storm', worse: 'high',
+    get: (c, k, i) => storm(c, k, i).damaging,
+    bins: () => stormBins([4, 8, 16]),
+    format: v => plural(v, 'damaging storm report'), short: String,
+  },
+  hail: {
+    cat: 'storms', name: 'Hail', unit: 'reported hail events, growing season', kind: 'storm', worse: 'high',
+    get: (c, k, i) => storm(c, k, i).byType[0],
+    bins: () => stormBins([3, 6, 10]),
+    format: v => plural(v, 'hail report'), short: String,
+  },
+  wind: {
+    cat: 'storms', name: 'Damaging wind', unit: 'reported thunderstorm and high-wind events, including derechos', kind: 'storm', worse: 'high',
+    get: (c, k, i) => storm(c, k, i).byType[1],
+    bins: () => stormBins([3, 6, 10]),
+    format: v => plural(v, 'wind report'), short: String,
+  },
+  tornado: {
+    cat: 'storms', name: 'Tornadoes', unit: 'reported tornadoes, growing season', kind: 'storm', worse: 'high',
+    get: (c, k, i) => storm(c, k, i).byType[2],
+    bins: () => stormBins([2, 4, 6]),
+    format: v => plural(v, 'tornado', 'tornadoes'), short: String,
+  },
+  floods: {
+    cat: 'storms', name: 'Floods', unit: 'reported flood and flash-flood events, growing season', kind: 'storm', worse: 'high',
+    get: (c, k, i) => storm(c, k, i).byType[3],
+    bins: () => stormBins([2, 4, 8]),
+    format: v => plural(v, 'flood report'), short: String,
+  },
+  cropDamage: {
+    cat: 'storms', name: 'Crop damage', unit: 'U.S. dollars of crop damage reported to NOAA, growing season', kind: 'storm', worse: 'high',
+    get: (c, k, i) => storm(c, k, i).cropDamage,
+    bins: () => [{ color: NEUTRAL, test: (v: number) => v <= 0, label: 'None reported' }, ...seqBins([1e4, 1e5, 1e6], RAMP.purple.slice(0, 4), money)],
+    format: v => (v > 0 ? `${money(v)} crop damage` : 'No crop damage reported'), short: v => (v > 0 ? money(v) : '$0'),
+  },
   aws: {
     cat: 'land', name: 'Soil water storage', unit: 'mm the top 100 cm of soil can hold', kind: 'soil', worse: 'low', fixed: true,
     get: c => c.aws,
@@ -180,12 +349,14 @@ export const metric = (id: MetricId): Metric => METRICS[id];
 
 export interface HeightLayer {
   name: string;
-  get?: (c: County, k: CropKey, i: number) => number | null;
+  get?: (c: County, k: CropKey, i: number, t?: DayContext) => number | null;
   max?: (k: CropKey) => number;
 }
 const loss = (v: number | null) => (v == null ? null : Math.max(0, -v));
 export const HEIGHTS = {
   none: { name: 'Flat, no height' },
+  dDry: { name: 'Days since rain (this date)', get: (c, _k, _i, t) => dayValue(t, 'dry', c), max: () => 45 },
+  dDeficit: { name: 'Rain shortfall, last 30 days', get: (c, _k, _i, t) => { const v = dayValue(t, 'rain30', c), n = normalValue(t, 'rain30', c); return v == null || n == null ? null : Math.max(0, n - v); }, max: () => 100 },
   wk: { name: 'Weeks in severe drought', get: (c, k, i) => season(c, k, i, 'wk'), max: k => MAX_WEEKS[k] },
   loss: { name: 'Yield loss below trend', get: (c, k, i) => loss(reported(c, k, i, 'a')), max: () => 40 },
   dsci: { name: 'Drought intensity', get: (c, k, i) => season(c, k, i, 'ds'), max: () => 400 },
@@ -193,6 +364,7 @@ export const HEIGHTS = {
   heat: { name: 'Days at 35 °C or hotter', get: (c, k, i) => season(c, k, i, 'ht'), max: () => 30 },
   yield: { name: 'Yield', get: (c, k, i) => reported(c, k, i, 'y'), max: k => ({ C: 240, S: 70, W: 90, G: 130 })[k] },
   prod: { name: 'Production', get: production, max: k => ({ C: 40, S: 8, W: 3, G: 1.5 })[k] },
+  storms: { name: 'Damaging storm reports', get: (c, k, i) => storm(c, k, i).damaging, max: () => 16 },
   droughty: { name: 'Drought-prone soil', get: c => c.dr, max: () => 100 },
   greenDrop: { name: 'Greenness drop', get: (c, _k, i) => loss(c.md?.na[i] ?? null), max: () => 12 },
 } satisfies Record<string, HeightLayer>;
@@ -204,10 +376,16 @@ export const height = (id: HeightId): HeightLayer => HEIGHTS[id];
 /** Why a county has no value for a layer, in words a user can act on. */
 export function whyMissing(c: County, id: MetricId, k: CropKey, i: number): string {
   const m = metric(id), d = c.d[k];
+  if (m.kind === 'daily') return id === 'dGdd' || id === 'dHot' ? (k === 'W' ? 'Not yet available for winter wheat' : 'Outside the growing season') : 'No value on this date';
   if (m.kind === 'soil') return 'No soil data for this county';
+  if (m.kind === 'derived') return 'No weather record for this county';
+  if (m.kind === 'freeze') return id === 'springRain' ? 'No weather record' : 'No freeze this year';
   if (m.kind === 'satellite') return c.md ? 'No satellite value this year' : 'No satellite record here';
   if (m.kind === 'irrigation') return c.s === 'IA' ? 'Iowa is rainfed: no irrigation series' : 'NASS published no irrigation split';
   if (!d) return `No ${CROP_NAME[k]} grown here`;
   if (m.kind === 'yield') return d.st[i] === 's' ? 'Planted, no grain harvested' : 'No reported yield';
   return 'No value this season';
 }
+
+/** How a layer relates to the selected date: read on that exact day, over the season it falls in, or fixed. */
+export const scopeOf = (m: Metric) => (m.kind === 'daily' ? 'On this date' : m.fixed ? 'Fixed' : 'This season or year');

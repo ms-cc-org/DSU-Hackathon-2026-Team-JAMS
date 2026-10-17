@@ -5,6 +5,8 @@ import { RAMP, SEVERITY, USDM } from '@/lib/colors';
 import { CROP_NAME, MONTH_LETTER, MONTH_SHORT, SEASON_MONTHS, STATES } from '@/lib/constants';
 import { MINUS, mean, niceCeil, num, ordinal, present } from '@/lib/format';
 import { metric, whyMissing, type MetricId } from '@/lib/metrics';
+import { calendarSlot, dayOf, dayValue, normalValue, seasonYearOf, yearOf } from '@/lib/daily';
+import { seasonDays } from '@/lib/storms';
 import type { County, CropKey, CropSeries } from '@/lib/types';
 import { useExplorer } from './explorer-context';
 
@@ -305,5 +307,51 @@ export function DroughtSeasonKey({ crop }: { crop: CropKey }) {
       <span><i style={{ background: 'var(--bar-drought)' }} />Severe-drought {CROP_NAME[crop]} season (4+ weeks in D2+)</span>
       <span><i style={{ background: 'var(--bar-rest)' }} />Other seasons</span>
     </div>
+  );
+}
+
+/** One calendar year day by day for a county: rain as bars, or the daily high against its normal. Click a day to jump to it. */
+export function DailyYear({ county, kind }: { county: County; kind: 'rain' | 'high' }) {
+  const { s, t, dispatch } = useExplorer();
+  if (!t.data) return <p className="hint">Loading daily weather…</p>;
+  const year = yearOf(s.day), start = dayOf(year, 1, 1), n = t.days, h = 120, T = 10, B = h - 20, step = (R0 - L0) / n;
+  const vals: (number | null)[] = [], norm: (number | null)[] = [];
+  for (let j = 0; j < n; j++) {
+    vals.push(dayValue(t, kind === 'rain' ? 'pcpn' : 'tmax', county, j));
+    if (kind === 'high') norm.push(normalValue(t, 'tmax', county, calendarSlot(start + j)));
+  }
+  const all = present([...vals, ...norm]);
+  if (!all.length) return <p className="hint">No daily weather for this county.</p>;
+  const lo = kind === 'rain' ? 0 : Math.floor(Math.min(...all) / 10) * 10, hi = kind === 'rain' ? niceCeil(Math.max(5, ...all)) : Math.ceil(Math.max(...all) / 10) * 10;
+  const y = (v: number) => B - ((v - lo) / (hi - lo || 1)) * (B - T), x = (j: number) => L0 + j * step;
+  const [from, to] = seasonDays(s.crop, seasonYearOf(s.day, s.crop));
+  const line = (arr: (number | null)[]) => {
+    let p = '', pen = false;
+    arr.forEach((v, j) => { if (v == null) { pen = false; return; } p += `${pen ? 'L' : 'M'}${x(j).toFixed(1)},${y(v).toFixed(1)}`; pen = true; });
+    return p;
+  };
+  const pick = (e: React.MouseEvent<SVGSVGElement>) => {
+    const r = e.currentTarget.getBoundingClientRect(), vx = ((e.clientX - r.left) / r.width) * W;
+    const j = Math.round((vx - L0) / step);
+    if (j >= 0 && j < n) dispatch({ type: 'day', day: start + j });
+  };
+  return (
+    <svg viewBox={`0 0 ${W} ${h}`} className="chart pickable" role="img" onClick={pick}
+      aria-label={kind === 'rain' ? `Daily rain in ${year}` : `Daily high temperature in ${year} against normal`}>
+      {from <= start + n - 1 && to >= start && (
+        <rect x={x(Math.max(0, from - start))} y={T - 4} width={(Math.min(n - 1, to - start) - Math.max(0, from - start) + 1) * step} height={B - T + 8} fill="var(--sel-band)" />
+      )}
+      <line x1={L0} x2={R0} y1={B} y2={B} stroke="var(--line-2)" />
+      <Tick x={L0 - 6} y={y(hi) + 4}>{kind === 'rain' ? `${hi} mm` : `${hi} °C`}</Tick>
+      <Tick x={L0 - 6} y={B + 4}>{kind === 'rain' ? '0' : `${num(lo)} °C`}</Tick>
+      {kind === 'rain'
+        ? vals.map((v, j) => (v != null && v >= 0.3 ? <rect key={j} x={x(j)} y={y(v)} width={Math.max(0.8, step)} height={B - y(v)} fill={RAMP.blue[1]} /> : null))
+        : <>
+            <path d={line(norm)} fill="none" stroke="var(--bar-rest)" strokeWidth={1.5} />
+            <path d={line(vals)} fill="none" stroke={RAMP.red[2]} strokeWidth={1.2} strokeLinejoin="round" />
+          </>}
+      <line x1={x(t.index)} x2={x(t.index)} y1={T - 4} y2={B + 2} stroke="var(--ink)" strokeWidth={1.5} />
+      {MONTH_LETTER.map((m, k) => <Tick key={k} x={x(dayOf(year, k + 1, 1) - start) + 2} y={h - 4} anchor="start">{m}</Tick>)}
+    </svg>
   );
 }

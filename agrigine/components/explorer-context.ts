@@ -1,6 +1,7 @@
 'use client';
 import { createContext, useContext, useSyncExternalStore, type Dispatch } from 'react';
 import type { Action, ExplorerState } from '@/lib/state';
+import type { DayContext } from '@/lib/daily';
 import type { Bundle, County, StateCode } from '@/lib/types';
 
 export interface ExplorerApi {
@@ -9,6 +10,8 @@ export interface ExplorerApi {
   s: ExplorerState;
   /** Index of the selected season in every 26-value series. */
   i: number;
+  /** The selected date, for day-by-day values. */
+  t: DayContext;
   dispatch: Dispatch<Action>;
   selectCounty: (fips: string) => void;
   selectState: (code: StateCode) => void;

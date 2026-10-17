@@ -10,6 +10,7 @@ import type { MapStyle, Ring } from '@/lib/compute';
 import { CROP_NAME, STATES, STATE_BY_FIPS, STATE_CODES, STATE_VIEW } from '@/lib/constants';
 import type { Outlines } from '@/lib/data';
 import { num } from '@/lib/format';
+import { formatDay } from '@/lib/daily';
 import { height, metric, whyMissing } from '@/lib/metrics';
 import { useExplorer } from './explorer-context';
 
@@ -63,7 +64,7 @@ interface Props {
 }
 
 export default function GlobeMap({ style, rings, outlines, camera, reduced, onView }: Props) {
-  const { s, i, byFips, dispatch, selectCounty, selectState } = useExplorer();
+  const { s, i, t, byFips, dispatch, selectCounty, selectState } = useExplorer();
   const [failed, setFailed] = useState(false);
   const [elevation, setElevation] = useState(() => elevationFor(camera.zoom));
   // deck.gl draws text into its own atlas, so it needs the resolved font name rather than the CSS variable.
@@ -87,7 +88,7 @@ export default function GlobeMap({ style, rings, outlines, camera, reduced, onVi
   const layers = useMemo(() => {
     const raised = s.height !== 'none';
     const sat = s.refs.imagery;
-    const key = `${s.metric}|${s.height}|${s.crop}|${s.year}|${s.hidden.join()}|${s.states.join()}|${s.reportedOnly}|${sat}`;
+    const key = `${s.metric}|${s.height}|${s.crop}|${s.day}|${style.byFips.size}|${s.hidden.join()}|${s.states.join()}|${s.reportedOnly}|${sat}`;
     const selected = s.county ? byFips.get(s.county) : undefined;
     const selZ = (s.county ? style.byFips.get(s.county)?.height ?? 0 : 0) * elevation + 300;
     const selRings = selected ? rings.filter(r => r.f === selected.f) : [];
@@ -164,7 +165,7 @@ export default function GlobeMap({ style, rings, outlines, camera, reduced, onVi
         getTextAnchor: 'middle', getAlignmentBaseline: 'center', updateTriggers: { getPosition: `${selZ}|${lift}`, getColor: sat },
       }),
     ];
-  }, [s.mode, s.metric, s.height, s.crop, s.year, s.hidden, s.states, s.reportedOnly, s.refs, s.county, style, rings, outlines, elevation, font, byFips, reduced]);
+  }, [s.mode, s.metric, s.height, s.crop, s.day, s.hidden, s.states, s.reportedOnly, s.refs, s.county, style, rings, outlines, elevation, font, byFips, reduced]);
 
   const getTooltip = ({ object, layer }: PickingInfo) => {
     if (!object || !layer) return null;
@@ -181,10 +182,10 @@ export default function GlobeMap({ style, rings, outlines, camera, reduced, onVi
     const st = c && style.byFips.get(c.f);
     if (!c || !st) return null;
     const m = metric(s.metric), h = height(s.height);
-    const when = m.fixed ? 'Soil' : `${s.year} ${CROP_NAME[s.crop]}`;
+    const when = m.kind === 'daily' ? formatDay(s.day) : m.fixed ? 'Soil' : `${s.year} ${CROP_NAME[s.crop]} season`;
     let html = `<b style="font-size:13px">${esc(c.n)} County, ${c.s}</b><div style="color:#66716A">${when}</div>`;
     html += `<div style="margin-top:4px;display:flex;gap:6px;align-items:center"><i style="width:10px;height:10px;border-radius:2px;background:${st.color ?? '#F1EFE6'};box-shadow:inset 0 0 0 1px rgba(20,32,26,.25)"></i>${esc(m.name)}: <b>${esc(st.value != null ? m.format(st.value) : whyMissing(c, s.metric, s.crop, i))}</b></div>`;
-    const hv = h.get?.(c, s.crop, i);
+    const hv = h.get?.(c, s.crop, i, t);
     if (hv != null) html += `<div>Height: ${esc(h.name)}, ${num(hv, hv % 1 && hv < 10 ? 1 : 0)}</div>`;
     html += '<div style="color:#66716A;margin-top:4px">Click for the full profile</div>';
     return { html, style: TOOLTIP_STYLE };

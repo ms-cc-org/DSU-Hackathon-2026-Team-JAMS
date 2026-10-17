@@ -1,10 +1,17 @@
 'use client';
 import { CROPS, CROP_NAME, CROP_TITLE, STATES, STATE_CODES } from '@/lib/constants';
 import type { MapStyle } from '@/lib/compute';
-import { CATEGORIES, CATEGORY_IDS, HEIGHTS, HEIGHT_IDS, METRIC_IDS, metric, type HeightId } from '@/lib/metrics';
-import type { RefLayer } from '@/lib/state';
+import { CATEGORIES, CATEGORY_IDS, HEIGHTS, HEIGHT_IDS, METRIC_IDS, metric, scopeOf, type HeightId } from '@/lib/metrics';
+import { formatDay } from '@/lib/daily';
+import type { ConditionId, RefLayer } from '@/lib/state';
 import { useExplorer } from './explorer-context';
 import { CategoryIcon, ChevronLeftIcon, LayersIcon } from './icons';
+
+const CONDITIONS: { id: ConditionId; label: string }[] = [
+  { id: 'drought', label: 'Severe drought this season (4+ weeks in D2+)' },
+  { id: 'storms', label: 'Hit by damaging storms this season' },
+  { id: 'longRecord', label: 'Long yield record (15+ reported seasons)' },
+];
 
 const REFS: { id: RefLayer; label: string }[] = [
   { id: 'imagery', label: 'Satellite imagery' },
@@ -31,12 +38,15 @@ function Categories() {
             </button>
             {open && (
               <div className="cat-items">
-                {METRIC_IDS.filter(id => metric(id).cat === cat).map(id => (
-                  <button key={id} className="mrow" aria-pressed={s.metric === id} onClick={() => dispatch({ type: 'metric', id })}>
+                {METRIC_IDS.filter(id => metric(id).cat === cat).map((id, n, ids) => (
+                  <div key={id}>
+                  {(n === 0 || scopeOf(metric(ids[n - 1])) !== scopeOf(metric(id))) && <p className="mscope">{scopeOf(metric(id))}</p>}
+                  <button className="mrow" aria-pressed={s.metric === id} onClick={() => dispatch({ type: 'metric', id })}>
                     <span className="radio" />
                     <span className="mname">{metric(id).name}</span>
                     <span className="mramp">{metric(id).bins(s.crop).map((b, j) => <i key={j} style={{ background: b.color }} />)}</span>
                   </button>
+                  </div>
                 ))}
               </div>
             )}
@@ -52,7 +62,7 @@ function Key({ style }: { style: MapStyle }) {
   const { s, dispatch } = useExplorer();
   const m = metric(s.metric);
   const max = Math.max(1, ...style.counts, style.noData);
-  const when = m.fixed ? 'does not change by season' : `${s.year} ${CROP_NAME[s.crop]}${m.kind === 'satellite' ? ' (county-wide, all vegetation)' : ''}`;
+  const when = m.kind === 'daily' ? formatDay(s.day) : m.fixed ? 'does not change by season' : `${s.year} ${CROP_NAME[s.crop]} season${m.kind === 'satellite' ? ' (county-wide, all vegetation)' : ''}`;
   const row = (key: number | 'nodata', color: string | null, label: string, n: number) => {
     const on = !s.hidden.includes(key);
     return (
@@ -130,6 +140,12 @@ export default function LayersPanel({ style, onHeight }: { style: MapStyle; onHe
           <label className="check">
             <input type="checkbox" checked={s.reportedOnly} onChange={e => dispatch({ type: 'reportedOnly', on: e.target.checked })} /> Only counties with a reported yield
           </label>
+          <p className="hint">Show only counties with:</p>
+          {CONDITIONS.map(f => (
+            <label key={f.id} className="check">
+              <input type="checkbox" checked={s.conditions.includes(f.id)} onChange={() => dispatch({ type: 'condition', id: f.id })} /> {f.label}
+            </label>
+          ))}
         </div>
         <div className="lp-sec">
           <h3>Map details</h3>

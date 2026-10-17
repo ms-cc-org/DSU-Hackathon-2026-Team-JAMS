@@ -1,7 +1,8 @@
 'use client';
-import { useEffect, useEffectEvent, useMemo, useReducer, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useEffectEvent, useMemo, useReducer, useRef, useState } from 'react';
 import { computeStyle, ringsOf } from '@/lib/compute';
 import { STATE_VIEW } from '@/lib/constants';
+import { dayContext, useDaily, yearOf } from '@/lib/daily';
 import { useAgData, type Outlines } from '@/lib/data';
 import type { HeightId } from '@/lib/metrics';
 import { initialState, reducer, toSearch, type MapMode } from '@/lib/state';
@@ -29,7 +30,7 @@ export default function Explorer() {
   if (error) {
     return (
       <LoadingShell title="Agrigine couldn't load its data">
-        {error}. Build it with <code>../.venv/bin/python scripts/build_data.py</code> from the agrigine folder, then reload.
+        {error}. Build it with <code>python3 scripts/build_data.py</code> from the agrigine folder, then reload.
       </LoadingShell>
     );
   }
@@ -44,9 +45,13 @@ function ExplorerReady({ bundle, outlines }: { bundle: Bundle; outlines: Outline
   const byFips = useMemo(() => new Map(bundle.counties.map(c => [c.f, c])), [bundle]);
   const rings = useMemo(() => ringsOf(bundle.counties), [bundle]);
   const i = s.year - bundle.years[0];
+  // The selected date: that year's daily weather (loaded on demand) plus the weekly drought map in effect.
+  const order = useMemo(() => new Map(bundle.counties.map((c, j) => [c.f, j])), [bundle]);
+  const daily = useDaily(yearOf(s.day));
+  const t = useMemo(() => dayContext(s.day, order, daily.data, daily.normals), [s.day, order, daily.data, daily.normals]);
   const style = useMemo(
-    () => computeStyle(bundle.counties, rings, { metric: s.metric, height: s.height, crop: s.crop, yearIndex: i, states: s.states, reportedOnly: s.reportedOnly, hidden: s.hidden }),
-    [bundle, rings, s.metric, s.height, s.crop, i, s.states, s.reportedOnly, s.hidden],
+    () => computeStyle(bundle.counties, rings, { metric: s.metric, height: s.height, crop: s.crop, yearIndex: i, states: s.states, reportedOnly: s.reportedOnly, conditions: s.conditions, hidden: s.hidden, t }),
+    [bundle, rings, s.metric, s.height, s.crop, i, s.states, s.reportedOnly, s.conditions, s.hidden, t],
   );
   const profileOpen = !!(s.county || s.state || s.outside);
 
@@ -122,14 +127,17 @@ function ExplorerReady({ bundle, outlines }: { bundle: Bundle; outlines: Outline
   });
   useEffect(() => {
     if (flewIn.current) return;
-    const t = setTimeout(flyIn, reduced ? 0 : 350);
-    return () => clearTimeout(t);
+    const timer = setTimeout(flyIn, reduced ? 0 : 350);
+    return () => clearTimeout(timer);
   }, [reduced]);
 
-  // Keep the address bar in step so any view can be shared or bookmarked.
+  // Keep the address bar in step so any view can be shared or bookmarked; waits for the dial to rest.
   useEffect(() => {
-    const q = toSearch(s);
-    if (window.location.search.slice(1) !== q) window.history.replaceState(null, '', `${window.location.pathname}?${q}`);
+    const timer = setTimeout(() => {
+      const q = toSearch(s);
+      if (window.location.search.slice(1) !== q) window.history.replaceState(null, '', `${window.location.pathname}?${q}`);
+    }, 400);
+    return () => clearTimeout(timer);
   }, [s]);
 
   // A trackpad pinch should zoom the map, never the whole page (Chrome sends ctrl+wheel, Safari sends gestures).
@@ -148,11 +156,14 @@ function ExplorerReady({ bundle, outlines }: { bundle: Bundle; outlines: Outline
 
   useEffect(() => {
     if (!s.playing) return;
-    const t = setInterval(() => dispatch({ type: 'step' }), 1100);
-    return () => clearInterval(t);
+    // About a month per second: two days every 60 ms.
+    const timer = setInterval(() => dispatch({ type: 'tick', by: 2 }), 60);
+    return () => clearInterval(timer);
   }, [s.playing]);
 
-  const api: ExplorerApi = { bundle, byFips, s, i, dispatch, selectCounty, selectState, zoomToCounty };
+  const api: ExplorerApi = { bundle, byFips, s, i, t, dispatch, selectCounty, selectState, zoomToCounty };
+  // The profile follows a step behind the dial, so dragging stays smooth on phones.
+  const lagging = useDeferredValue(api);
 
   return (
     <ExplorerContext.Provider value={api}>
@@ -171,7 +182,7 @@ function ExplorerReady({ bundle, outlines }: { bundle: Bundle; outlines: Outline
           <section className={`explore${s.mode === 'map' ? ' flat' : ''}${s.refs.imagery ? ' sat' : ''}${profileOpen ? ' has-profile' : ''}`} aria-label="Agrigine explorer">
             <GlobeMap style={style} rings={rings} outlines={outlines} camera={camera} reduced={reduced} onView={v => { view.current = v; }} />
             <LayersPanel style={style} onHeight={setHeight} />
-            <ProfilePanel />
+            <ExplorerContext.Provider value={lagging}><ProfilePanel /></ExplorerContext.Provider>
             <div className="mapctl">
               <button onClick={() => zoomBy(1)} aria-label="Zoom in">+</button>
               <button onClick={() => zoomBy(-1)} aria-label="Zoom out">−</button>

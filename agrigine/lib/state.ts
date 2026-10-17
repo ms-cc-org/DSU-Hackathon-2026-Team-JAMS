@@ -1,12 +1,16 @@
 // Explorer state, its reducer, and the URL format that makes any view shareable,
-// e.g. /?county=19007&year=2012&crop=C&layer=anom&height=wk&tab=drought
+// e.g. /?county=19007&date=2012-07-15&crop=C&layer=dRain30Anom&tab=drought
 import type { BinKey } from './compute';
+import { FIRST_DAY, FIRST_YEAR, LAST_DAY, LAST_YEAR, clampDay, dayOf, isoDay, parseIsoDay, sameDateInSeason, seasonYearOf } from './daily';
 import { CROPS, STATE_CODES } from './constants';
 import { CATEGORY_IDS, HEIGHT_IDS, METRIC_IDS, metric, reported, type CategoryId, type HeightId, type MetricId } from './metrics';
 import type { Bundle, CropKey, StateCode } from './types';
 
-export type TabId = 'overview' | 'crops' | 'weather' | 'drought' | 'land' | 'sat';
-export const TAB_IDS: TabId[] = ['overview', 'crops', 'weather', 'drought', 'land', 'sat'];
+export type TabId = 'overview' | 'crops' | 'weather' | 'drought' | 'storms' | 'land' | 'sat';
+export const TAB_IDS: TabId[] = ['overview', 'crops', 'weather', 'drought', 'storms', 'land', 'sat'];
+/** "Show only" filters: severe drought this season, damaging storms this season, a long yield record. */
+export type ConditionId = 'drought' | 'storms' | 'longRecord';
+export const CONDITION_IDS: ConditionId[] = ['drought', 'storms', 'longRecord'];
 export type MapMode = 'globe' | 'map';
 export type RefLayer = 'imagery' | 'borders' | 'states' | 'counties' | 'labels';
 
@@ -15,9 +19,13 @@ export interface ExplorerState {
   metric: MetricId;
   height: HeightId;
   crop: CropKey;
+  /** The selected date, as days since 2000-01-01. */
+  day: number;
+  /** The harvest year whose season the date falls in, for season and yearly layers. Kept in step with day and crop. */
   year: number;
   states: StateCode[];
   reportedOnly: boolean;
+  conditions: ConditionId[];
   hidden: BinKey[];
   refs: Record<RefLayer, boolean>;
   county: string | null;
@@ -33,10 +41,12 @@ export type Action =
   | { type: 'metric'; id: MetricId }
   | { type: 'height'; id: HeightId }
   | { type: 'crop'; crop: CropKey }
+  | { type: 'day'; day: number }
   | { type: 'year'; year: number }
-  | { type: 'step' }
+  | { type: 'tick'; by: number }
   | { type: 'toggleState'; code: StateCode }
   | { type: 'reportedOnly'; on: boolean }
+  | { type: 'condition'; id: ConditionId }
   | { type: 'toggleBin'; bin: BinKey }
   | { type: 'showAllBins' }
   | { type: 'ref'; layer: RefLayer; on: boolean }
@@ -50,8 +60,12 @@ export type Action =
   | { type: 'play'; on: boolean }
   | { type: 'layers'; open: boolean };
 
-export const FIRST_YEAR = 2000;
-export const LAST_YEAR = 2025;
+export { FIRST_YEAR, LAST_YEAR };
+
+const atDay = (s: ExplorerState, day: number, crop = s.crop): ExplorerState => {
+  const d = clampDay(day);
+  return { ...s, day: d, crop, year: seasonYearOf(d, crop) };
+};
 
 export function reducer(s: ExplorerState, a: Action): ExplorerState {
   switch (a.type) {
@@ -60,11 +74,13 @@ export function reducer(s: ExplorerState, a: Action): ExplorerState {
     case 'height':
       return { ...s, height: a.id };
     case 'crop':
-      return { ...s, crop: a.crop, hidden: [] };
+      return { ...atDay(s, s.day, a.crop), hidden: [] };
+    case 'day':
+      return { ...atDay(s, a.day), playing: false };
     case 'year':
-      return { ...s, year: a.year, playing: false };
-    case 'step':
-      return s.year >= LAST_YEAR ? { ...s, playing: false } : { ...s, year: s.year + 1 };
+      return { ...atDay(s, sameDateInSeason(s.day, a.year, s.crop)), playing: false };
+    case 'tick':
+      return s.day >= LAST_DAY ? { ...s, playing: false } : atDay(s, s.day + a.by);
     case 'toggleState': {
       const on = s.states.includes(a.code);
       if (on && s.states.length === 1) return s;
@@ -72,6 +88,8 @@ export function reducer(s: ExplorerState, a: Action): ExplorerState {
     }
     case 'reportedOnly':
       return { ...s, reportedOnly: a.on };
+    case 'condition':
+      return { ...s, conditions: s.conditions.includes(a.id) ? s.conditions.filter(c => c !== a.id) : [...s.conditions, a.id] };
     case 'toggleBin':
       return { ...s, hidden: s.hidden.includes(a.bin) ? s.hidden.filter(b => b !== a.bin) : [...s.hidden, a.bin] };
     case 'showAllBins':
@@ -93,7 +111,7 @@ export function reducer(s: ExplorerState, a: Action): ExplorerState {
     case 'mode':
       return { ...s, mode: a.mode };
     case 'play':
-      return { ...s, playing: a.on, year: a.on && s.year >= LAST_YEAR ? FIRST_YEAR : s.year };
+      return a.on && s.day >= LAST_DAY ? { ...atDay(s, FIRST_DAY), playing: true } : { ...s, playing: a.on };
     case 'layers':
       return { ...s, layersOpen: a.open };
   }
@@ -106,17 +124,22 @@ const pick = <T extends string>(v: string | null, allowed: readonly T[]): T | un
 export function initialState(bundle: Bundle, search: string, narrow: boolean): ExplorerState {
   const q = new URLSearchParams(search);
   const year = Number(q.get('year'));
+  // A shared link names a date; older links name a year, which opens on July 15 of it.
+  const day = parseIsoDay(q.get('date')) ?? (year >= FIRST_YEAR && year <= LAST_YEAR ? dayOf(year, 7, 15) : dayOf(2012, 7, 15));
   const fips = q.get('county');
   const code = pick(q.get('state'), STATE_CODES);
-  const metricId = pick(q.get('layer'), METRIC_IDS) ?? 'anom';
+  const metricId = pick(q.get('layer'), METRIC_IDS) ?? 'dRain30Anom';
+  const crop = pick(q.get('crop'), CROPS) ?? 'C';
   const s: ExplorerState = {
     mode: pick(q.get('view'), ['globe', 'map'] as const) ?? 'globe',
     metric: metricId,
-    height: pick(q.get('height'), HEIGHT_IDS) ?? 'wk',
-    crop: pick(q.get('crop'), CROPS) ?? 'C',
-    year: year >= FIRST_YEAR && year <= LAST_YEAR ? year : 2012,
+    height: pick(q.get('height'), HEIGHT_IDS) ?? 'none',
+    crop,
+    day,
+    year: seasonYearOf(day, crop),
     states: [...STATE_CODES],
     reportedOnly: false,
+    conditions: (q.get('only') ?? '').split(',').filter((v): v is ConditionId => (CONDITION_IDS as string[]).includes(v)),
     hidden: [],
     refs: { imagery: true, borders: true, states: true, counties: true, labels: true },
     county: fips && bundle.counties.some(c => c.f === fips) ? fips : null,
@@ -147,11 +170,12 @@ export function toSearch(s: ExplorerState): string {
   const q = new URLSearchParams();
   if (s.county) q.set('county', s.county);
   if (s.state) q.set('state', s.state);
-  q.set('year', String(s.year));
+  q.set('date', isoDay(s.day));
   q.set('crop', s.crop);
   q.set('layer', s.metric);
   q.set('height', s.height);
   if (s.mode !== 'globe') q.set('view', s.mode);
+  if (s.conditions.length) q.set('only', s.conditions.join(','));
   if (s.county && s.tab !== 'overview') q.set('tab', s.tab);
   return q.toString();
 }

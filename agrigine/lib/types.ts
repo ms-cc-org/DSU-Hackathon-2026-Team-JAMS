@@ -37,6 +37,24 @@ export interface ModisSeries {
   pk: Num[]; // peak greenness day of year
 }
 
+/** Crop-season weather measures derived from the daily weather (scripts/derive_weather.py). */
+export interface SeasonWeather {
+  hn: Num[]; // hot nights, low of 22 C or warmer
+  fh: Num[]; // days at 32 C or hotter in the flowering month
+  dry: Num[]; // longest run of days under 1 mm of rain
+  hr: Num[]; // days with 25 mm of rain or more
+}
+
+/** Calendar-year freeze dates (day of year) and April-May rain. */
+export interface FreezeSeries {
+  ls: Num[]; // last spring freeze
+  ff: Num[]; // first fall freeze
+  sr: Num[]; // spring rain, mm
+}
+
+/** One NOAA storm report: days since 2000-01-01, type code (0 hail, 1 wind, 2 tornado, 3 flood, 4 other), magnitude, crop damage in USD. */
+export type StormEvent = [number, number, number | null, number];
+
 export interface County {
   f: string; // 5-digit FIPS, always text
   n: string; // name without "County"
@@ -52,6 +70,9 @@ export interface County {
   mp?: Num[]; // monthly rainfall, 26 years x 12 months
   mx?: Num[]; // monthly mean daily high, 26 years x 12 months
   wkc?: string | null; // weekly drought, 2 characters per week from weekStart
+  sw?: Partial<Record<CropKey, SeasonWeather>>;
+  fz?: FreezeSeries;
+  ev?: StormEvent[];
 }
 
 export interface Bundle {

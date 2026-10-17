@@ -86,6 +86,21 @@ The daily weather file already supports measures the master table never computed
 | CPC outlooks | 1995 → today | Probabilities, not amounts |
 | Open-Meteo | 1940 → today plus forecasts | Point data, sampled at county centroids |
 
+## File formats (decided)
+
+Daily data is stored as parquet, which the models and backend read. Everything people open is CSV, following the hackathon conventions: FIPS codes as 5-character text, `year` as the harvest year, crop names `CORN`, `SOYBEANS`, `WHEAT` and `SORGHUM`, metric units, and blank (never 0) for missing.
+
+| Data | Format | Path pattern |
+|---|---|---|
+| Daily, per county | Parquet, one file per year so no file passes GitHub's 100 MB limit | `data/processed/<source>/daily/<year>.parquet` |
+| Season, per county × crop × year | CSV; joins onto `master_dataset.csv` | `data/processed/<source>/<source>_season.csv` |
+| Monthly, per county | CSV | `data/processed/<source>/<source>_monthly.csv` |
+| Events (storms) | CSV, one row per event | `data/processed/storms/storm_events.csv` |
+| Climate index (ENSO) | CSV, one row per month | `data/processed/enso/oni_monthly.csv` |
+| Catalog | CSV, one row per column: unit, description, source, license, join keys, what it feeds, caveats | `data/catalog/variables.csv` |
+
+Why: in a benchmark on the existing daily weather file (2.5 million rows), parquet loaded in 0.08 s against 0.47–4.2 s for compressed CSV. It keeps FIPS codes as text and dates as dates, and DuckDB reads it natively.
+
 ## Suggested order
 
 1. Derived measures from the daily file. No new download.

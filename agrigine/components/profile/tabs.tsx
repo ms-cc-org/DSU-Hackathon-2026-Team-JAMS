@@ -2,13 +2,16 @@
 import type { ReactNode } from 'react';
 import { RAMP, SEVERITY, SEVERITY_SHORT, USDM } from '@/lib/colors';
 import { CROPS, CROP_NAME, CROP_TITLE, SEASON_LABEL, SEVERE_WEEKS, STATES } from '@/lib/constants';
-import { dayOfYear, median, num, pct, plural, present, thousands } from '@/lib/format';
+import { dayOfYear, median, num, pct, plural, present, signed, thousands } from '@/lib/format';
 import { METRICS } from '@/lib/metrics';
+import { STORM_TYPES, eventDate, magnitude, money, seasonEvents, stormSeason } from '@/lib/storms';
+import { dayValue, droughtOn, formatDay, normalValue, seasonProgress, seasonToDate } from '@/lib/daily';
 import type { County, CropKey, CropSeries } from '@/lib/types';
-import { CropSpark, DroughtSeasonKey, MonthlyHigh, MonthlyRain, PeerStrip, WeeklyDrought, YearBars, severeColor } from '../charts';
+import { CropSpark, DailyYear, DroughtSeasonKey, MonthlyHigh, MonthlyRain, PeerStrip, WeeklyDrought, YearBars, severeColor } from '../charts';
 import { useExplorer } from '../explorer-context';
 
 const reportedCount = (d: CropSeries) => [...d.st].filter(x => x === 'r').length;
+const FLOWERING_MONTH: Record<CropKey, string> = { C: 'July', S: 'August', G: 'August', W: 'May' };
 const Fact = ({ term, value, sub }: { term: string; value: ReactNode; sub?: ReactNode }) => (
   <div>
     <dt>{term}</dt>
@@ -45,6 +48,34 @@ function Summary({ c, k }: { c: County; k: CropKey }) {
   );
 }
 
+/** The county on the selected date: the day's weather, the drought map in effect, recent storms, and the season so far. */
+function ThisDay({ c, k }: { c: County; k: CropKey }) {
+  const { s, t } = useExplorer();
+  const hi = dayValue(t, 'tmax', c), lo = dayValue(t, 'tmin', c), hiNormal = normalValue(t, 'tmax', c);
+  const rain = dayValue(t, 'pcpn', c), r7 = dayValue(t, 'rain7', c), r30 = dayValue(t, 'rain30', c), r30Normal = normalValue(t, 'rain30', c);
+  const dry = dayValue(t, 'dry', c), drought = droughtOn(c, s.day), storms = METRICS.dStorms7.get(c, k, 0, t);
+  const gdd = seasonToDate(t, c, k, 'gdd'), hot = seasonToDate(t, c, k, 'hot');
+  return (
+    <div className="blk">
+      <h4>{formatDay(s.day, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</h4>
+      <p className="cap">{CROP_TITLE[k]}: {seasonProgress(s.day, k).label.toLowerCase()}</p>
+      {!t.data ? <p className="hint">Loading daily weather…</p> : (
+        <dl className="facts">
+          <Fact term="High and low" value={hi == null ? '—' : `${num(hi, 1)} / ${lo == null ? '—' : num(lo, 1)} °C`}
+            sub={hi != null && hiNormal != null ? `The high is ${signed(hi - hiNormal, 1)} °C from normal for this date` : undefined} />
+          <Fact term="Rain that day" value={rain == null ? '—' : rain < 0.3 ? 'None' : `${num(rain, 1)} mm`} />
+          <Fact term="Rain, last 7 and 30 days" value={`${r7 == null ? '—' : num(r7)} / ${r30 == null ? '—' : num(r30)} mm`}
+            sub={r30 != null && r30Normal != null && r30Normal >= 5 ? `30-day rain is ${pct(((r30 - r30Normal) / r30Normal) * 100)} vs normal` : undefined} />
+          <Fact term="Days since rain" value={dry == null ? '—' : num(dry)} sub="Since the last day with 2.5 mm or more" />
+          <Fact term="Drought this week" value={drought ? SEVERITY[drought.cat] : '—'} sub={drought ? `Drought Monitor map in effect, DSCI ${drought.dsci}` : undefined} />
+          <Fact term="Storms, last 7 days" value={storms == null ? '—' : num(storms)} sub="Hail, wind, tornado and flood reports" />
+          {k !== 'W' && <Fact term="Season so far" value={gdd == null ? 'Not started' : `${num(gdd)} GDD`} sub={hot == null ? undefined : `${plural(hot, 'day')} at 35 °C or hotter`} />}
+        </dl>
+      )}
+    </div>
+  );
+}
+
 function AnomalyHistory({ d, k }: { d: CropSeries; k: CropKey }) {
   const { bundle } = useExplorer();
   return (
@@ -71,7 +102,8 @@ export function OverviewTab({ c }: { c: County }) {
   const grown = CROPS.filter(x => c.d[x]);
   return (
     <>
-      <div className="blk"><Summary c={c} k={k} /></div>
+      <ThisDay c={c} k={k} />
+      <div className="blk"><h4>The {s.year} season</h4><Summary c={c} k={k} /></div>
       {d && <AnomalyHistory d={d} k={k} />}
       <div className="blk">
         <h4>Compared with other {STATES[c.s]} counties</h4>
@@ -177,6 +209,36 @@ export function WeatherTab({ c }: { c: County }) {
       ) : (
         <p className="note">Season weather is computed for crops grown here, and {c.n} County has no {CROP_NAME[k]} record. The monthly charts below cover every county.</p>
       )}
+      {c.sw?.[k] && (
+        <div className="blk">
+          <h4>Crop stress, {s.year} {CROP_NAME[k]} season</h4>
+          <dl className="facts">
+            <Fact term="Hot nights" value={orDash(c.sw[k]!.hn[i], v => num(v))} sub="Nights with a low of 22 °C or warmer. Warm nights cut yield even when days are normal" />
+            <Fact term="Heat at flowering" value={orDash(c.sw[k]!.fh[i], v => `${num(v)} days`)} sub={`Days at 32 °C or hotter in ${FLOWERING_MONTH[k]}, when ${CROP_NAME[k]} flowers`} />
+            <Fact term="Longest dry spell" value={orDash(c.sw[k]!.dry[i], v => `${num(v)} days`)} sub="Days in a row with under 1 mm of rain" />
+            <Fact term="Heavy rain days" value={orDash(c.sw[k]!.hr[i], v => num(v))} sub="Days with 25 mm of rain or more" />
+          </dl>
+        </div>
+      )}
+      {c.fz && (
+        <div className="blk">
+          <h4>Freeze and planting, {s.year}</h4>
+          <dl className="facts">
+            <Fact term="Last spring freeze" value={c.fz.ls[i] == null ? 'None' : dayOfYear(c.fz.ls[i]!)} sub="Last night at 0 °C or colder before August" />
+            <Fact term="First fall freeze" value={c.fz.ff[i] == null ? 'None' : dayOfYear(c.fz.ff[i]!)} sub="First night at 0 °C or colder from August on" />
+            <Fact term="Frost-free days" value={c.fz.ls[i] != null && c.fz.ff[i] != null ? num(c.fz.ff[i]! - c.fz.ls[i]!) : '—'} />
+            <Fact term="Spring rain" value={orDash(c.fz.sr[i], v => `${num(v)} mm`)} sub="April and May. A wet spring delays planting" />
+          </dl>
+        </div>
+      )}
+      <div className="blk">
+        <h4>Day by day, {formatDay(s.day, { year: 'numeric' })}</h4>
+        <DailyYear county={c} kind="rain" />
+        <div className="legend"><span><i style={{ background: RAMP.blue[1] }} />Daily rain</span><span><i style={{ background: 'var(--sel-band)' }} />{CROP_TITLE[k]} season</span><span><i className="ln" style={{ background: 'var(--ink)' }} />Selected day</span></div>
+        <DailyYear county={c} kind="high" />
+        <div className="legend"><span><i className="ln" style={{ background: RAMP.red[2] }} />Daily high</span><span><i className="ln" style={{ background: 'var(--bar-rest)' }} />Normal high</span></div>
+        <p className="cap">Click a day to jump to it.</p>
+      </div>
       {c.mp && (
         <div className="blk">
           <h4>Rainfall by month, {s.year}</h4>
@@ -283,6 +345,56 @@ export function DroughtTab({ c }: { c: County }) {
         </div>
       )}
       {!d && !c.wkc && <p className="note">No drought record for this county.</p>}
+    </>
+  );
+}
+
+export function StormsTab({ c }: { c: County }) {
+  const { s, bundle } = useExplorer();
+  const k = s.crop;
+  const season = stormSeason(c, k, s.year);
+  const events = seasonEvents(c, k, s.year);
+  const yearly = bundle.years.map(y => stormSeason(c, k, y).damaging);
+  const day = (e: (typeof events)[number]) => eventDate(e).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  return (
+    <>
+      <div className="blk">
+        <h4>{s.year} {CROP_NAME[k]} season, {SEASON_LABEL[k]}</h4>
+        <dl className="facts">
+          <Fact term="Hail" value={num(season.byType[0])} />
+          <Fact term="Damaging wind" value={num(season.byType[1])} sub="Thunderstorm and high-wind reports, including derechos" />
+          <Fact term="Tornadoes" value={num(season.byType[2])} />
+          <Fact term="Floods" value={num(season.byType[3])} sub="Flood and flash-flood reports" />
+          <Fact term="Reported crop damage" value={season.cropDamage ? money(season.cropDamage) : 'None reported'} />
+        </dl>
+      </div>
+      <div className="blk">
+        <h4>Reports this season</h4>
+        {events.length ? (
+          <div className="tablewrap">
+            <table className="ctable">
+              <thead><tr><th>Date</th><th>Type</th><th>Size</th><th>Crop damage</th></tr></thead>
+              <tbody>
+                {events.map((e, j) => (
+                  <tr key={j} className="static">
+                    <td>{day(e)}</td><td>{STORM_TYPES[e[1]]}</td><td>{magnitude(e) || '—'}</td><td>{e[3] ? money(e[3]) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="hint">No storms were reported here during the {SEASON_LABEL[k]} season.</p>
+        )}
+      </div>
+      <div className="blk">
+        <h4>Damaging storm reports by season</h4>
+        <YearBars
+          label="Damaging storm reports by season" values={yearly} color={() => RAMP.purple[1]}
+          tip={j => `${bundle.years[j]}: ${plural(yearly[j], 'damaging storm report')}`}
+        />
+      </div>
+      <p className="note">Storms reported to NOAA by county. Reports depend on spotters, so quiet rural areas can be undercounted. Drought, heat and freeze events are filed by forecast zone and aren&apos;t included yet.</p>
     </>
   );
 }

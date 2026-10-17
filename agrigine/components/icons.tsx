@@ -40,6 +40,13 @@ export function CategoryIcon({ id }: { id: CategoryId | 'overview' }) {
           <path d="M1.8 12.2h12.4M3.5 14.6h9" />
         </Stroke>
       );
+    case 'storms':
+      return (
+        <Stroke>
+          <path d="M4.5 8.5h7a2.3 2.3 0 0 0 .2-4.6A3.4 3.4 0 0 0 5 4a2.2 2.2 0 0 0-.5 4.5z" />
+          <path d="M8.6 9.5L7 12.2h2.2L8 15" />
+        </Stroke>
+      );
     case 'sat':
       return (
         <Stroke>

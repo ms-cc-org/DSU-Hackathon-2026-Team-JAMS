@@ -20,6 +20,7 @@
   --cat-weather: #2A78D6;
   --cat-land: #1BAF7A;
   --cat-sat: #E34948;
+  --cat-storms: #7B4FD1;
   --bar-drought: #EB6834;
   --bar-rest: #8F958C;
   --loss: #A8281F;
@@ -35,7 +36,7 @@
   :root {
     --bg: #0F1411; --surface: #172019; --surface-2: #1F2921; --ink: #E8EEE7; --ink-2: #B6C1B8; --muted: #8F9B91;
     --line: #2A332C; --line-2: #3F4A42; --sel-band: #243026; --accent: #86C276; --pivot: #6FAE5F; --pivot-2: #A9D68A; --stubble: #4A4433;
-    --cat-crops: #2E9E2E; --cat-drought: #C98500; --cat-weather: #3987E5; --cat-land: #199E70; --cat-sat: #E66767;
+    --cat-crops: #2E9E2E; --cat-drought: #C98500; --cat-weather: #3987E5; --cat-land: #199E70; --cat-sat: #E66767; --cat-storms: #A58AF0;
     --bar-drought: #D95926; --bar-rest: #7D847B;
     --loss: #F29A90; --gain: #94BDF2; --warn: #F4C46A; --warn-wash: #3A2E14;
     --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 32px rgba(0, 0, 0, .5);
@@ -110,6 +111,7 @@ button { cursor: pointer; }
 .mrow[aria-pressed="true"] .radio { border: 5px solid var(--cc); }
 .mrow[aria-pressed="true"] .mname { font-weight: 700; }
 .mname { font-size: 13px; }
+.mscope { margin: 8px 6px 2px; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
 .mramp { display: flex; gap: 1px; }
 .mramp i { width: 8px; height: 12px; border-radius: 2px; }
 
@@ -183,6 +185,7 @@ button.tile:hover { background: var(--surface-2); }
 .cap { margin: 0; font-size: 12px; color: var(--muted); }
 .lead { margin: 0; font-size: 14px; line-height: 1.5; }
 svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
+svg.chart.pickable { cursor: pointer; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; box-shadow: inset 0 0 0 1px rgba(20, 32, 26, .15); }
@@ -205,6 +208,8 @@ dl.facts .sub { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
 .ctable td { padding: 7px 6px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ctable tbody tr { cursor: pointer; }
 .ctable tbody tr:hover td { background: var(--surface-2); }
+.ctable tbody tr.static { cursor: default; }
+.ctable tbody tr.static:hover td { background: none; }
 .ctable tr[aria-selected="true"] td { font-weight: 700; }
 .tablewrap { overflow-x: auto; }
 .multi { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -237,6 +242,44 @@ dl.facts .sub { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
 .tl-track svg { width: 100%; height: 26px; display: block; }
 .tl-track input { width: 100%; margin: 2px 0 0; accent-color: var(--ink); }
 .ticks { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; padding: 0 2px; }
+.tl-cap { font-weight: 700; font-size: 15px; color: var(--ink) !important; }
+
+/* Season dial: a horizontal wheel of years that snaps the chosen season under the needle */
+.dial-wrap { position: relative; flex: 1; min-width: 0; }
+.dial-wrap.off { opacity: .4; pointer-events: none; }
+.dial {
+  position: relative; display: flex; overflow-x: auto; overflow-y: hidden;
+  scroll-snap-type: x mandatory; scrollbar-width: none; padding-inline: calc(50% - 36px);
+  cursor: grab; user-select: none; -webkit-user-select: none; touch-action: pan-x; border-radius: 10px;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 16%, #000 84%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 16%, #000 84%, transparent);
+}
+.dial::-webkit-scrollbar { display: none; }
+.dial.dragging { cursor: grabbing; scroll-snap-type: none; }
+.dial:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dial-yr {
+  flex: 0 0 72px; scroll-snap-align: center; display: flex; flex-direction: column; align-items: center;
+  padding: 2px 0 0; border: 0; background: none; color: var(--muted); font-variant-numeric: tabular-nums; cursor: inherit;
+  transform: perspective(420px) rotateY(calc(var(--d, 0) * -58deg)) scale(calc(1 - var(--a, 0) * .2));
+  opacity: calc(1 - var(--a, 0) * .5);
+}
+.dial-bars { height: 26px; display: flex; align-items: flex-end; }
+.dial-bar { width: 24px; border-radius: 3px 3px 0 0; background: var(--bar-drought); opacity: .85; }
+.dial-ticks { width: 100%; height: 9px; border-top: 1px solid var(--line-2); background: repeating-linear-gradient(to right, var(--line-2) 0 1px, transparent 1px 12px); background-position: 6px 0; }
+.dial-label { font-size: 13px; font-weight: 600; line-height: 22px; }
+.dial-yr[aria-current="true"] .dial-label { color: var(--ink); font-size: 20px; font-weight: 800; }
+.dial-yr[aria-current="true"] .dial-bar { background: var(--ink); opacity: 1; }
+.dial-needle { position: absolute; left: 50%; top: -2px; height: 40px; width: 3px; margin-left: -1.5px; border-radius: 3px; background: var(--cat-drought); pointer-events: none; box-shadow: 0 0 0 2px var(--surface); }
+@media (prefers-reduced-motion: reduce) { .dial-yr { transform: none; } }
+
+.tl-date { font-weight: 800; font-size: 19px; line-height: 1.15; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dial-canvas { display: block; width: 100%; touch-action: none; cursor: grab; }
+.dial-canvas:active { cursor: grabbing; }
+.dial-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+.dial-wrap .dial-needle { top: 0; height: 58px; }
+.tl-note { flex-direction: column; align-items: flex-start !important; gap: 4px !important; }
+.tl-note span { display: inline-flex; align-items: center; gap: 8px; }
+.tl-note i.band { background: var(--cat-crops); opacity: .45; }
 .tl-note { flex: 0 1 220px; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
 .tl-note i { width: 10px; height: 10px; border-radius: 2px; background: var(--bar-drought); flex: none; }
 

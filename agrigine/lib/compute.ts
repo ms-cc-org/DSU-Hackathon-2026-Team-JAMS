@@ -1,5 +1,8 @@
 import { binOf, type Bin } from './bins';
 import { height, metric, type HeightId, type MetricId } from './metrics';
+import type { ConditionId } from './state';
+import { stormSeason } from './storms';
+import type { DayContext } from './daily';
 import type { County, CropKey, LngLat, StateCode } from './types';
 
 export type BinKey = number | 'nodata';
@@ -37,7 +40,20 @@ export interface StyleInput {
   yearIndex: number;
   states: StateCode[];
   reportedOnly: boolean;
+  conditions: ConditionId[];
   hidden: BinKey[];
+  /** The selected date, for day-by-day layers. */
+  t?: DayContext;
+}
+
+/** Whether a county passes every "show only" filter for this crop and season. */
+function meets(c: County, k: CropKey, i: number, conditions: ConditionId[]) {
+  for (const id of conditions) {
+    if (id === 'drought' && !((c.d[k]?.wk[i] ?? 0) >= 4)) return false;
+    if (id === 'storms' && stormSeason(c, k, 2000 + i).damaging < 1) return false;
+    if (id === 'longRecord' && [...(c.d[k]?.st ?? '')].filter(x => x === 'r').length < 15) return false;
+  }
+  return true;
 }
 
 export const ringsOf = (counties: County[]): Ring[] => counties.flatMap(c => c.p.map(ring => ({ f: c.f, ring })));
@@ -57,10 +73,10 @@ export function computeStyle(counties: County[], rings: Ring[], s: StyleInput): 
   for (const c of counties) {
     let status: CountyStatus, value: number | null = null, bin = -1, hv = 0;
     const yieldOk = !s.reportedOnly || c.d[k]?.st[i] === 'r';
-    if (!states.has(c.s) || !yieldOk) status = 'out';
+    if (!states.has(c.s) || !yieldOk || !meets(c, k, i, s.conditions)) status = 'out';
     else {
       total++;
-      value = m.get(c, k, i);
+      value = m.get(c, k, i, s.t);
       if (value == null) {
         noData++;
         status = hidden.has('nodata') ? 'hidden' : 'nodata';
@@ -70,7 +86,7 @@ export function computeStyle(counties: County[], rings: Ring[], s: StyleInput): 
         status = hidden.has(bin) ? 'hidden' : 'on';
       }
       if (status === 'on' && h.get && h.max) {
-        const x = h.get(c, k, i);
+        const x = h.get(c, k, i, s.t);
         hv = x == null ? 0 : Math.max(0, Math.min(1, x / h.max(k)));
       }
       if (status !== 'hidden') shown++;

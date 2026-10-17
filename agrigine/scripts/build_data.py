@@ -40,6 +40,20 @@ def read(path):
     return df
 
 
+def read_optional_csv(path):
+    """Add-on CSVs (scripts/derive_weather.py, scripts/storm_events_pull.py). Missing ones are skipped."""
+    p = DATA / path
+    if not p.exists():
+        print(f"  (skipped {path}: not built yet)")
+        return None
+    return pd.read_csv(p, dtype={"fips": str})
+
+
+# Storm event types the app groups; anything else is "other".
+STORM_TYPE = {"Hail": 0, "Thunderstorm Wind": 1, "High Wind": 1, "Strong Wind": 1, "Tornado": 2, "Flash Flood": 3, "Flood": 3}
+DAY0 = pd.Timestamp("2000-01-01")
+
+
 def main():
     master = read("master_dataset.parquet")
     master[["extreme_heat_days", "max_drought_severity", "weeks_in_d2_plus"]] = master[
@@ -69,6 +83,17 @@ def main():
         worst = worst.where(~(dr[[f"D{j}" for j in range(k, 5)]].sum(axis=1) > 1), k + 1)
     dr["code"] = worst.astype(int).astype(str) + dr.dsci.clip(0, 500).map(lambda v: B62[int(round(v / 500 * 61))])
     weekly = dr.groupby("fips").code.apply("".join)
+
+    # Add-on data: derived season weather, freeze dates and NOAA storm events
+    season_wx = read_optional_csv("processed/derived/weather_season.csv")
+    season_wx = None if season_wx is None else dict(tuple(season_wx.groupby("fips")))
+    freeze = read_optional_csv("processed/derived/freeze_dates.csv")
+    freeze = None if freeze is None else dict(tuple(freeze.groupby("fips")))
+    storms = read_optional_csv("processed/storms/storm_events.csv")
+    if storms is not None:
+        storms["day"] = (pd.to_datetime(storms.date) - DAY0).dt.days
+        storms = storms[(storms.day >= 0) & (pd.to_datetime(storms.date).dt.year <= 2025)]
+        storms = dict(tuple(storms.groupby("fips")))
 
     counties = []
     for feat in geo["features"]:
@@ -142,6 +167,21 @@ def main():
         rec["wkc"] = weekly.get(fips)
         if not rec["ir"]:
             del rec["ir"]
+        if season_wx is not None and fips in season_wx:
+            sw = season_wx[fips]
+            rec["sw"] = {}
+            for crop, k in CROPS.items():
+                s = sw[sw.crop == crop].set_index("year").reindex(YEARS)
+                if s.hot_nights.notna().any():
+                    rec["sw"][k] = {"hn": arr(s.hot_nights, 0), "fh": arr(s.flowering_heat_days, 0),
+                                    "dry": arr(s.longest_dry_spell_days, 0), "hr": arr(s.heavy_rain_days, 0)}
+        if freeze is not None and fips in freeze:
+            f = freeze[fips].set_index("year").reindex(YEARS)
+            rec["fz"] = {"ls": arr(f.last_spring_freeze_doy, 0), "ff": arr(f.first_fall_freeze_doy, 0), "sr": arr(f.spring_rain_mm, 0)}
+        if storms is not None and fips in storms:
+            # [days since 2000-01-01, type code, magnitude, crop damage in USD]
+            rec["ev"] = [[int(e.day), STORM_TYPE.get(e.type, 4), num(e.magnitude, 2), int(e.crop_damage_usd) if pd.notna(e.crop_damage_usd) else 0]
+                         for e in storms[fips].itertuples()]
         counties.append(rec)
 
     bundle = {"years": YEARS, "weekStart": str(pd.Timestamp(weeks[0]).date()), "nWeeks": len(weeks), "counties": counties}

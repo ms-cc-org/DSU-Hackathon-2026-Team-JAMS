@@ -4,19 +4,21 @@ import { binOf } from '@/lib/bins';
 import { SEVERITY_SHORT, SEVERITY_WORD } from '@/lib/colors';
 import { CROPS, CROP_NAME, CROP_TITLE, SEASON_LABEL, SEVERE_WEEKS, STATES, STATE_CODES } from '@/lib/constants';
 import { dayOfYear, median, num, pct, plural, present } from '@/lib/format';
+import { formatDay } from '@/lib/daily';
 import { CATEGORIES, metric, season, whyMissing, type MetricId } from '@/lib/metrics';
 import { TAB_IDS, type TabId } from '@/lib/state';
 import type { County, StateCode } from '@/lib/types';
 import { YearBars } from '../charts';
 import { useExplorer } from '../explorer-context';
 import { CategoryIcon, CloseIcon } from '../icons';
-import { CropsTab, DroughtTab, LandTab, OverviewTab, SatelliteTab, WeatherTab } from './tabs';
+import { CropsTab, DroughtTab, LandTab, OverviewTab, SatelliteTab, StormsTab, WeatherTab } from './tabs';
 
-const TABS: Record<TabId, { name: string; color: string; icon: 'overview' | 'crops' | 'weather' | 'drought' | 'land' | 'sat'; Body: (p: { c: County }) => ReactNode }> = {
+const TABS: Record<TabId, { name: string; color: string; icon: 'overview' | 'crops' | 'weather' | 'drought' | 'storms' | 'land' | 'sat'; Body: (p: { c: County }) => ReactNode }> = {
   overview: { name: 'Overview', color: 'var(--ink)', icon: 'overview', Body: OverviewTab },
   crops: { name: 'Crops', color: CATEGORIES.crops.color, icon: 'crops', Body: CropsTab },
   weather: { name: 'Weather', color: CATEGORIES.weather.color, icon: 'weather', Body: WeatherTab },
   drought: { name: 'Drought', color: CATEGORIES.drought.color, icon: 'drought', Body: DroughtTab },
+  storms: { name: 'Storms', color: CATEGORIES.storms.color, icon: 'storms', Body: StormsTab },
   land: { name: 'Land & water', color: CATEGORIES.land.color, icon: 'land', Body: LandTab },
   sat: { name: 'Satellite', color: CATEGORIES.sat.color, icon: 'sat', Body: SatelliteTab },
 };
@@ -58,7 +60,7 @@ function CountyProfile({ c }: { c: County }) {
           {Math.abs(c.c[1]).toFixed(2)}° N, {Math.abs(c.c[0]).toFixed(2)}° W · {grown.length ? `Grows ${grown.length > 1 ? grown.slice(0, -1).join(', ') + ' and ' + grown[grown.length - 1] : grown[0]}` : 'No NASS crop records'}
         </p>
         <div className="p-ctx">
-          <span>Showing the <b>{s.year} {CROP_NAME[k]}</b> season ({SEASON_LABEL[k]})</span>
+          <span><b>{formatDay(s.day)}</b> · {s.year} {CROP_NAME[k]} season ({SEASON_LABEL[k]})</span>
           <button className="linkbtn" onClick={zoomToCounty}>Zoom to county</button>
         </div>
       </div>

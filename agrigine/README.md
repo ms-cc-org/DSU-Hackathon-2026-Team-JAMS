@@ -18,12 +18,16 @@ For a production build: `npm run build && npm start`.
 
 ## Rebuild the data
 
-`public/data/agrigine.json` is checked in, so you only need this after the files in `../data` change. It uses the repo's Python environment (pandas and pyarrow):
+`public/data/agrigine.json` is checked in, so you only need this after the files in `../data` change. Any Python 3.11+ with pandas and pyarrow works:
 
 ```bash
 cd agrigine
-../.venv/bin/python scripts/build_data.py
+python3 scripts/derive_weather.py      # season weather and freeze dates from the daily weather (no download)
+python3 scripts/storm_events_pull.py   # NOAA storm reports; caches downloads in ../data/raw/storms
+python3 scripts/build_data.py          # the app's data bundle
 ```
+
+The first two write CSVs to `../data/processed/derived/` and `../data/processed/storms/`.
 
 ## Where things are
 
