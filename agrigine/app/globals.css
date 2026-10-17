@@ -151,6 +151,20 @@ button { cursor: pointer; }
 .mapctl button + button { border-top: 1px solid #DCE1DA; }
 .mapctl button:hover { background: #F3F5F1; }
 .mapctl svg { width: 16px; height: 16px; }
+.mapctl .compass svg { width: 24px; height: 24px; transition: transform .1s linear; }
+.mapctl .tilt { font-size: 13px; font-weight: 800; letter-spacing: .02em; }
+.mapctl .tilt[aria-pressed="true"] { background: #14201A; color: #FFFFFF; }
+.mapctl .help { font-size: 15px; font-weight: 800; color: #4D5A52; }
+.map:focus { outline: none; }
+.map:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
+.maphelp {
+  position: absolute; z-index: 3; right: calc(max(16px, env(safe-area-inset-right, 0px)) + 50px); bottom: 16px; width: 290px;
+  background: var(--surface); color: var(--ink-2); border-radius: 12px; box-shadow: var(--shadow); padding: 12px 14px; font-size: 13px;
+}
+.has-profile .maphelp { right: calc(396px + max(10px, env(safe-area-inset-right, 0px)) + 50px); }
+.maphelp b { color: var(--ink); }
+.maphelp ul { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+@media (max-width: 960px) { .mapctl .rot, .mapctl .help, .maphelp { display: none; } }
 .attrib { position: absolute; z-index: 2; left: 50%; transform: translateX(-50%); bottom: 6px; font-size: 11px; color: rgba(232, 238, 231, .75); white-space: nowrap; pointer-events: none; }
 .flat .attrib { color: rgba(20, 32, 26, .7); }
 .explore.flat.sat { background: #0B1520; }
@@ -326,3 +340,20 @@ dl.facts .sub { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
   .tl-year output { font-size: 20px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* Cities and insurance blocks */
+.places { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 12px; }
+.places button { display: flex; justify-content: space-between; gap: 8px; padding: 5px 2px; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; text-align: left; }
+.places button span:last-child { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.places button:hover span:first-child { text-decoration: underline; }
+.causes { display: grid; gap: 6px; margin: 10px 0 4px; }
+.causes .cov { grid-template-columns: 116px minmax(0, 1fr) 64px; }
+.causes .cov span:last-child { text-align: right; }
+.sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: 0; }
+.blk .sub-h { margin-top: 14px; font-size: 12px; }
+
+/* Map hover card */
+.maptip { position: absolute; top: 0; left: 0; z-index: 4; pointer-events: none; max-width: 260px; padding: 8px 10px; border-radius: 10px; background: #FFFFFF; color: #14201A; box-shadow: 0 2px 12px rgba(11, 21, 32, .3); font-size: 12px; line-height: 1.4; }
+.maptip[hidden] { display: none; }
+.maptip b:first-child { font-size: 13px; }
+.maptip .dim { color: #66716A; }

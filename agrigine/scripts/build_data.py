@@ -52,6 +52,7 @@ def read_optional_csv(path):
 # Storm event types the app groups; anything else is "other".
 STORM_TYPE = {"Hail": 0, "Thunderstorm Wind": 1, "High Wind": 1, "Strong Wind": 1, "Tornado": 2, "Flash Flood": 3, "Flood": 3}
 DAY0 = pd.Timestamp("2000-01-01")
+LOSS_GROUPS = ["drought", "heat", "wet", "hail", "wind", "freeze", "price", "other"]
 
 
 def main():
@@ -89,6 +90,19 @@ def main():
     season_wx = None if season_wx is None else dict(tuple(season_wx.groupby("fips")))
     freeze = read_optional_csv("processed/derived/freeze_dates.csv")
     freeze = None if freeze is None else dict(tuple(freeze.groupby("fips")))
+    ins = read_optional_csv("processed/insurance/cause_of_loss.csv")
+    if ins is not None:
+        ins = ins[ins.year.isin(YEARS)].copy()
+        ins["crop_i"] = ins.crop.map({"CORN": 0, "SOYBEANS": 1, "WHEAT": 2, "SORGHUM": 3})
+        ins["group_i"] = ins.cause_group.map({g: i for i, g in enumerate(LOSS_GROUPS)})
+        ins["lag"] = (ins.loss_year.fillna(ins.year) - ins.year).astype(int)
+        ins["month"] = ins.loss_month.fillna(0).astype(int)
+        ins["loss_i"] = (ins.loss_year.fillna(ins.year) - YEARS[0]).astype(int)
+        ins_month = ins[ins.month > 0].groupby(["fips", "crop_i", "loss_i", "month"], as_index=False).indemnity_usd.sum()
+        ins_month = dict(tuple(ins_month.groupby("fips")))
+        ins = ins.groupby(["fips", "year", "crop_i", "group_i"], as_index=False).indemnity_usd.sum()
+        ins = dict(tuple(ins.groupby("fips")))
+    cities = read_optional_csv("processed/cities/cities.csv")
     storms = read_optional_csv("processed/storms/storm_events.csv")
     if storms is not None:
         storms["day"] = (pd.to_datetime(storms.date) - DAY0).dt.days
@@ -182,9 +196,18 @@ def main():
             # [days since 2000-01-01, type code, magnitude, crop damage in USD]
             rec["ev"] = [[int(e.day), STORM_TYPE.get(e.type, 4), num(e.magnitude, 2), int(e.crop_damage_usd) if pd.notna(e.crop_damage_usd) else 0]
                          for e in storms[fips].itertuples()]
+        if ins is not None and fips in ins:
+            # [season-year index, crop, cause group, payout in USD]
+            rec["ins"] = [[int(r.year - YEARS[0]), int(r.crop_i), int(r.group_i), int(r.indemnity_usd)] for r in ins[fips].itertuples()]
+        if ins is not None and fips in ins_month:
+            # [crop, loss-year index, month of loss, payout in USD]
+            rec["insm"] = [[int(r.crop_i), int(r.loss_i), int(r.month), int(r.indemnity_usd)] for r in ins_month[fips].itertuples()]
         counties.append(rec)
 
-    bundle = {"years": YEARS, "weekStart": str(pd.Timestamp(weeks[0]).date()), "nWeeks": len(weeks), "counties": counties}
+    known = {c["f"] for c in counties}
+    city_rows = [] if cities is None else [[r.name, r.state, r.fips, r.lon, r.lat, int(r.population)]
+                                           for r in cities.itertuples() if r.fips in known]
+    bundle = {"years": YEARS, "cities": city_rows, "weekStart": str(pd.Timestamp(weeks[0]).date()), "nWeeks": len(weeks), "counties": counties}
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(bundle, separators=(",", ":")))
     print(f"Wrote {OUT.relative_to(APP)}: {len(counties)} counties, {len(weeks)} drought weeks, {OUT.stat().st_size / 1e6:.2f} MB")

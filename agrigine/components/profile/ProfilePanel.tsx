@@ -34,8 +34,8 @@ function CloseButton() {
 
 /** A summary tile. Clicking it colors the whole map by that layer. */
 function Tile({ id, c, label, value, sub }: { id: MetricId; c: County; label: string; value: (v: number) => string; sub: (v: number) => string }) {
-  const { s, i, dispatch } = useExplorer();
-  const m = metric(id), v = m.get(c, s.crop, i);
+  const { s, i, t, dispatch } = useExplorer();
+  const m = metric(id), v = m.get(c, s.crop, i, t);
   const tone = id === 'anom' && v != null ? (v < -5 ? ' loss' : v > 5 ? ' gain' : '') : '';
   return (
     <button className="tile" aria-pressed={s.metric === id} title={`Color the map by ${m.name.toLowerCase()}`} onClick={() => dispatch({ type: 'metric', id })}>
@@ -85,7 +85,7 @@ function CountyProfile({ c }: { c: County }) {
 }
 
 function StateProfile({ code }: { code: StateCode }) {
-  const { s, i, bundle, selectCounty } = useExplorer();
+  const { s, i, t, bundle, selectCounty } = useExplorer();
   const k = s.crop, years = bundle.years;
   const all = bundle.counties.filter(c => c.s === code);
   const grow = all.filter(c => c.d[k]);
@@ -98,7 +98,7 @@ function StateProfile({ code }: { code: StateCode }) {
     return { med: a.length >= 3 ? median(a) : null, share: grow.length ? grow.filter(c => (c.d[k]!.wk[j] ?? 0) >= SEVERE_WEEKS).length / grow.length : 0 };
   });
   const m = metric(s.metric);
-  const ranked = all.map(c => ({ c, v: m.get(c, k, i) })).filter((r): r is { c: County; v: number } => r.v != null);
+  const ranked = all.map(c => ({ c, v: m.get(c, k, i, t) })).filter((r): r is { c: County; v: number } => r.v != null);
   ranked.sort((a, b) => (m.worse === 'low' ? a.v - b.v : b.v - a.v));
   const bins = m.bins(k);
   return (

@@ -18,16 +18,28 @@ For a production build: `npm run build && npm start`.
 
 ## Rebuild the data
 
-`public/data/agrigine.json` is checked in, so you only need this after the files in `../data` change. Any Python 3.11+ with pandas and pyarrow works:
+All the data is checked in: the hackathon base data, every processed dataset in `data/processed/` and the app's files in `public/data/`. A fresh clone has everything; only the raw download caches (`data/raw/`, about 500 MB) are left out. To refresh the data or pull it all again from the sources, run one script (Python 3.11+):
 
 ```bash
-cd agrigine
-python3 scripts/derive_weather.py      # season weather and freeze dates from the daily weather (no download)
-python3 scripts/storm_events_pull.py   # NOAA storm reports; caches downloads in ../data/raw/storms
-python3 scripts/build_data.py          # the app's data bundle
+python3 -m pip install -r agrigine/scripts/requirements.txt
+python3 agrigine/scripts/pull_all.py              # everything that's missing
+python3 agrigine/scripts/pull_all.py --force      # redo every step
+python3 agrigine/scripts/pull_all.py --only power,daily
 ```
 
-The first two write CSVs to `../data/processed/derived/` and `../data/processed/storms/`.
+The script caches downloads in `data/raw/<source>/` and writes to `data/processed/`. On a clone it skips every step, since the outputs are already there; use `--force` to pull everything again (about 500 MB of downloads, 10 to 20 minutes). In order, it runs:
+
+| Step | Script | Source | Writes |
+|---|---|---|---|
+| storms | `storm_events_pull.py` | NOAA Storm Events | `data/processed/storms/` |
+| derived | `derive_weather.py` | Hackathon daily weather (no download) | `data/processed/derived/` |
+| power | `power_pull.py` | NASA POWER: VPD, crop water demand, sunlight, wind, humidity, soil moisture | `data/processed/power/daily/` |
+| insurance | `rma_pull.py` | USDA RMA crop insurance Cause of Loss | `data/processed/insurance/` |
+| cities | `cities_pull.py` | Census Gazetteer and 2024 population estimates | `data/processed/cities/` |
+| bundle | `build_data.py` | All of the above | `public/data/agrigine.json` |
+| daily | `build_daily.py` | Daily weather and NASA POWER | `public/data/daily/` |
+
+Each script also runs on its own from the `agrigine` folder, for example `python3 scripts/rma_pull.py`.
 
 ## Where things are
 

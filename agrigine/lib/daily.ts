@@ -56,11 +56,13 @@ export function seasonProgress(day: number, k: CropKey) {
 
 // ---------- daily weather files ----------
 
-export const CH = { tmax: 0, tmin: 1, pcpn: 2, rain7: 3, rain30: 4, dry: 5 } as const;
+// The first six come from the hackathon's daily weather; the rest from NASA POWER (scripts/power_pull.py).
+export const CH = { tmax: 0, tmin: 1, pcpn: 2, rain7: 3, rain30: 4, dry: 5, vpd: 6, et0: 7, srad: 8, wind: 9, rh: 10, wb30: 11, soil: 12 } as const;
 export type Channel = keyof typeof CH;
-const SCALE = [10, 10, 10, 10, 1, 1];
-const NORMAL = { rain30: 0, tmax: 1 } as const;
-const NORMAL_SCALE = [1, 10];
+const SCALE = [10, 10, 10, 10, 1, 1, 100, 10, 1, 10, 1, 1, 1];
+const CHANNELS = SCALE.length;
+const NORMAL = { rain30: 0, tmax: 1, vpd: 2, wb30: 3, soil: 4 } as const;
+const NORMAL_SCALE = [1, 10, 100, 1, 1];
 const MISSING = -32768;
 
 const loaded = new Map<number, Int16Array>();
@@ -123,8 +125,11 @@ export function dayValue(t: DayContext | undefined, ch: Channel, c: County, inde
   if (!t?.data) return null;
   const ci = t.order.get(c.f);
   if (ci == null) return null;
-  const v = t.data[(CH[ch] * t.counties + ci) * t.days + index];
-  return v === MISSING ? null : v / SCALE[CH[ch]];
+  const at = (CH[ch] * t.counties + ci) * t.days + index;
+  // Files built before gridMET was added hold only the first six channels.
+  if (t.data.length < CHANNELS * t.counties * t.days && CH[ch] >= 6) return null;
+  const v = t.data[at];
+  return v === MISSING || v === undefined ? null : v / SCALE[CH[ch]];
 }
 
 export function normalValue(t: DayContext | undefined, ch: keyof typeof NORMAL, c: County, slot = t?.slot ?? 0) {
@@ -132,7 +137,7 @@ export function normalValue(t: DayContext | undefined, ch: keyof typeof NORMAL, 
   const ci = t.order.get(c.f);
   if (ci == null) return null;
   const v = t.normals[(NORMAL[ch] * t.counties + ci) * 366 + slot];
-  return v === MISSING ? null : v / NORMAL_SCALE[NORMAL[ch]];
+  return v === MISSING || v === undefined ? null : v / NORMAL_SCALE[NORMAL[ch]];
 }
 
 const GDD_LIMITS: Record<CropKey, [number, number]> = { C: [10, 30], S: [10, 30], G: [10, 38], W: [0, 26] };

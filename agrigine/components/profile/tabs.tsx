@@ -6,6 +6,7 @@ import { dayOfYear, median, num, pct, plural, present, signed, thousands } from 
 import { METRICS } from '@/lib/metrics';
 import { STORM_TYPES, eventDate, magnitude, money, seasonEvents, stormSeason } from '@/lib/storms';
 import { dayValue, droughtOn, formatDay, normalValue, seasonProgress, seasonToDate } from '@/lib/daily';
+import { LOSS_COLOR, LOSS_LABEL, insuranceSeason, mainCause } from '@/lib/insurance';
 import type { County, CropKey, CropSeries } from '@/lib/types';
 import { CropSpark, DailyYear, DroughtSeasonKey, MonthlyHigh, MonthlyRain, PeerStrip, WeeklyDrought, YearBars, severeColor } from '../charts';
 import { useExplorer } from '../explorer-context';
@@ -55,6 +56,8 @@ function ThisDay({ c, k }: { c: County; k: CropKey }) {
   const rain = dayValue(t, 'pcpn', c), r7 = dayValue(t, 'rain7', c), r30 = dayValue(t, 'rain30', c), r30Normal = normalValue(t, 'rain30', c);
   const dry = dayValue(t, 'dry', c), drought = droughtOn(c, s.day), storms = METRICS.dStorms7.get(c, k, 0, t);
   const gdd = seasonToDate(t, c, k, 'gdd'), hot = seasonToDate(t, c, k, 'hot');
+  const vpd = dayValue(t, 'vpd', c), et0 = dayValue(t, 'et0', c), soil = dayValue(t, 'soil', c), soilNormal = normalValue(t, 'soil', c);
+  const wb = dayValue(t, 'wb30', c), wbNormal = normalValue(t, 'wb30', c);
   return (
     <div className="blk">
       <h4>{formatDay(s.day, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</h4>
@@ -67,6 +70,12 @@ function ThisDay({ c, k }: { c: County; k: CropKey }) {
           <Fact term="Rain, last 7 and 30 days" value={`${r7 == null ? '—' : num(r7)} / ${r30 == null ? '—' : num(r30)} mm`}
             sub={r30 != null && r30Normal != null && r30Normal >= 5 ? `30-day rain is ${pct(((r30 - r30Normal) / r30Normal) * 100)} vs normal` : undefined} />
           <Fact term="Days since rain" value={dry == null ? '—' : num(dry)} sub="Since the last day with 2.5 mm or more" />
+          <Fact term="Root-zone soil moisture" value={soil == null ? '—' : `${num(soil)}% wet`}
+            sub={soil != null && soilNormal != null ? `${signed(soil - soilNormal)} points vs normal for this date` : undefined} />
+          <Fact term="Water balance, last 30 days" value={wb == null ? '—' : `${signed(wb)} mm`}
+            sub={wb != null && wbNormal != null ? `Rain minus crop water demand. Normal for this date: ${signed(wbNormal)} mm` : 'Rain minus crop water demand'} />
+          <Fact term="Crop water demand" value={et0 == null ? '—' : `${num(et0, 1)} mm/day`} sub="Reference evapotranspiration (FAO-56)" />
+          <Fact term="Air dryness (VPD)" value={vpd == null ? '—' : `${num(vpd, 2)} kPa`} sub={vpd == null ? undefined : vpd >= 2 ? 'High: crops lose water fast' : vpd >= 1.2 ? 'Moderate' : 'Low'} />
           <Fact term="Drought this week" value={drought ? SEVERITY[drought.cat] : '—'} sub={drought ? `Drought Monitor map in effect, DSCI ${drought.dsci}` : undefined} />
           <Fact term="Storms, last 7 days" value={storms == null ? '—' : num(storms)} sub="Hail, wind, tornado and flood reports" />
           {k !== 'W' && <Fact term="Season so far" value={gdd == null ? 'Not started' : `${num(gdd)} GDD`} sub={hot == null ? undefined : `${plural(hot, 'day')} at 35 °C or hotter`} />}
@@ -96,6 +105,28 @@ function AnomalyHistory({ d, k }: { d: CropSeries; k: CropKey }) {
   );
 }
 
+/** Census places in the county, largest first. */
+function Places({ c }: { c: County }) {
+  const { bundle, selectCity } = useExplorer();
+  const places = (bundle.cities ?? []).filter(p => p[2] === c.f).sort((a, b) => b[5] - a[5]);
+  if (!places.length) return null;
+  const people = places.reduce((sum, p) => sum + p[5], 0);
+  return (
+    <div className="blk">
+      <h4>Cities and towns</h4>
+      <p className="cap">{plural(places.length, 'incorporated place')}, home to {thousands(people)} people (2024 Census estimate).</p>
+      <div className="places">
+        {places.slice(0, 8).map(p => (
+          <button key={p[0]} type="button" onClick={() => selectCity(p)}>
+            <span>{p[0]}</span><span>{thousands(p[5])}</span>
+          </button>
+        ))}
+      </div>
+      {places.length > 8 && <p className="cap">And {plural(places.length - 8, 'smaller place')}. Zoom in to see them on the map.</p>}
+    </div>
+  );
+}
+
 export function OverviewTab({ c }: { c: County }) {
   const { s } = useExplorer();
   const k = s.crop, d = c.d[k];
@@ -105,6 +136,7 @@ export function OverviewTab({ c }: { c: County }) {
       <ThisDay c={c} k={k} />
       <div className="blk"><h4>The {s.year} season</h4><Summary c={c} k={k} /></div>
       {d && <AnomalyHistory d={d} k={k} />}
+      <Places c={c} />
       <div className="blk">
         <h4>Compared with other {STATES[c.s]} counties</h4>
         <p className="cap">{s.year} {CROP_NAME[k]} season. Each tick is a county; the dot is {c.n}.</p>
@@ -128,6 +160,48 @@ export function OverviewTab({ c }: { c: County }) {
   );
 }
 
+/** USDA RMA crop insurance payouts for one crop: this season by cause, and per acre for every season. */
+function Insurance({ c, k }: { c: County; k: CropKey }) {
+  const { s, i, bundle } = useExplorer();
+  const season = insuranceSeason(c, k, i);
+  if (!season) return null;
+  const ap = c.d[k]!.ap[i], cause = mainCause(season);
+  const perAcre = bundle.years.map((_, j) => {
+    const t = insuranceSeason(c, k, j), a = c.d[k]!.ap[j];
+    return t == null || !a ? null : t.total / a;
+  });
+  const causes = season.byGroup.map((v, g) => [g, v] as const).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  return (
+    <div className="blk">
+      <h4>Crop insurance payouts, {s.year} {CROP_NAME[k]}</h4>
+      <dl className="facts">
+        <Fact term="Paid to farmers" value={season.total ? money(season.total) : 'None'} sub="Federal crop insurance indemnities for this crop year" />
+        <Fact term="Per planted acre" value={season.total && ap ? `$${num(season.total / ap)}` : '—'} sub={ap ? `${thousands(ap)} acres planted` : 'No planted acres reported'} />
+        <Fact term="Main cause" value={cause == null || cause < 0 ? '—' : LOSS_LABEL[cause]} />
+      </dl>
+      {causes.length > 0 && (
+        <div className="causes">
+          {causes.map(([g, v]) => (
+            <div className="cov" key={g}>
+              <span><i className="sw" style={{ background: LOSS_COLOR[g] }} />{LOSS_LABEL[g]}</span>
+              <span className="meter"><i style={{ width: `${(v / season.total) * 100}%`, background: LOSS_COLOR[g] }} /></span>
+              <span>{money(v)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <h4 className="sub-h">Payouts per planted acre, 2000–2025</h4>
+      <YearBars
+        label={`${CROP_TITLE[k]} insurance payouts per planted acre by season`} values={perAcre}
+        color={(_, j) => { const m = mainCause(insuranceSeason(c, k, j)); return m == null || m < 0 ? 'var(--muted)' : LOSS_COLOR[m]; }}
+        tip={j => perAcre[j] == null ? `${bundle.years[j]}: no planted acres reported`
+          : `${bundle.years[j]}: $${num(perAcre[j]!)} per acre${perAcre[j]! > 0 ? `, mostly ${LOSS_LABEL[mainCause(insuranceSeason(c, k, j))!].toLowerCase()}` : ''}`}
+      />
+      <p className="cap">Bars are colored by the main cause that season. Price decline is a market loss on revenue policies, not crop damage.{k === 'W' ? ' Wheat combines winter and spring wheat.' : ''} Source: USDA Risk Management Agency, Cause of Loss.</p>
+    </div>
+  );
+}
+
 export function CropsTab({ c }: { c: County }) {
   const { s, i, dispatch } = useExplorer();
   const grown = CROPS.filter(x => c.d[x]);
@@ -135,6 +209,7 @@ export function CropsTab({ c }: { c: County }) {
   const irrigated = grown.filter(x => c.ir?.[x]);
   return (
     <>
+      <Insurance c={c} k={c.d[s.crop] ? s.crop : grown[0]} />
       <div className="blk">
         <h4>{s.year} harvest by crop</h4>
         <div className="tablewrap">

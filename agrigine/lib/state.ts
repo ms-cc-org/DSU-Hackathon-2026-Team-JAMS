@@ -12,7 +12,7 @@ export const TAB_IDS: TabId[] = ['overview', 'crops', 'weather', 'drought', 'sto
 export type ConditionId = 'drought' | 'storms' | 'longRecord';
 export const CONDITION_IDS: ConditionId[] = ['drought', 'storms', 'longRecord'];
 export type MapMode = 'globe' | 'map';
-export type RefLayer = 'imagery' | 'borders' | 'states' | 'counties' | 'labels';
+export type RefLayer = 'imagery' | 'cities' | 'borders' | 'states' | 'counties' | 'labels';
 
 export interface ExplorerState {
   mode: MapMode;
@@ -141,7 +141,7 @@ export function initialState(bundle: Bundle, search: string, narrow: boolean): E
     reportedOnly: false,
     conditions: (q.get('only') ?? '').split(',').filter((v): v is ConditionId => (CONDITION_IDS as string[]).includes(v)),
     hidden: [],
-    refs: { imagery: true, borders: true, states: true, counties: true, labels: true },
+    refs: { imagery: true, cities: true, borders: true, states: true, counties: true, labels: true },
     county: fips && bundle.counties.some(c => c.f === fips) ? fips : null,
     state: code ?? null,
     outside: null,

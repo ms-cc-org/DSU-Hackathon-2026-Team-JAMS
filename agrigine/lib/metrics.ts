@@ -4,11 +4,12 @@ import { NEUTRAL, RAMP, SEVERITY, SEVERITY_SHORT, USDM } from './colors';
 import { CROP_NAME, MAX_WEEKS } from './constants';
 import { dayOfYear, num, pct, plural, signed, thousands } from './format';
 import { DAMAGING, money, stormSeason } from './storms';
-import { dayValue, droughtOn, normalValue, seasonToDate, type DayContext } from './daily';
+import { dateOf, dayValue, droughtOn, normalValue, seasonToDate, type DayContext } from './daily';
+import { LOSS_COLOR, LOSS_LABEL, insuranceMonth, insuranceSeason, mainCause } from './insurance';
 import type { County, CropKey, SeriesField } from './types';
 
 export type CategoryId = 'crops' | 'drought' | 'weather' | 'storms' | 'land' | 'sat';
-export type MetricKind = 'daily' | 'yield' | 'season' | 'derived' | 'freeze' | 'storm' | 'soil' | 'irrigation' | 'satellite';
+export type MetricKind = 'daily' | 'yield' | 'insurance' | 'season' | 'derived' | 'freeze' | 'storm' | 'soil' | 'irrigation' | 'satellite';
 
 /** Category colors come from a validated categorical palette and always appear with a label and icon. */
 export const CATEGORIES: Record<CategoryId, { name: string; color: string }> = {
@@ -60,6 +61,7 @@ const FIRST_YEAR = 2000;
 const derived = (c: County, k: CropKey, i: number, f: 'hn' | 'fh' | 'dry' | 'hr') => c.sw?.[k]?.[f][i] ?? null;
 const storm = (c: County, k: CropKey, i: number) => stormSeason(c, k, FIRST_YEAR + i);
 const stormBins = (cuts: number[]) => zeroBins(cuts, RAMP.purple.slice(0, 4), String);
+const moneyBins = (cuts: number[]) => [{ color: NEUTRAL, test: (v: number) => v <= 0, label: 'None' }, ...seqBins(cuts, RAMP.red, money)];
 const rainBins = (cuts: number[]) => [{ color: NEUTRAL, test: (v: number) => v < 0.3, label: 'No rain' }, ...seqBins(cuts, RAMP.blue.slice(0, 4), v => `${v} mm`)];
 
 const production = (c: County, k: CropKey, i: number) => {
@@ -142,6 +144,66 @@ export const METRICS = {
     bins: () => stormBins([2, 4, 8]),
     format: v => plural(v, 'storm report'), short: String,
   },
+  dVpd: {
+    cat: 'weather', name: 'Dry air (VPD)', unit: 'vapor pressure deficit, kPa: how hard the air pulls water from plants', kind: 'daily', worse: 'high',
+    get: (c, _k, _i, t) => dayValue(t, 'vpd', c),
+    bins: () => seqBins([1, 1.5, 2.2, 3], RAMP.orange, v => `${v} kPa`),
+    format: v => `${num(v, 2)} kPa VPD`, short: v => num(v, 1),
+  },
+  dEt0: {
+    cat: 'weather', name: 'Crop water demand', unit: 'mm of water a healthy crop would use that day (reference evapotranspiration)', kind: 'daily', worse: 'high',
+    get: (c, _k, _i, t) => dayValue(t, 'et0', c),
+    bins: () => seqBins([2, 4, 6, 8], RAMP.teal, v => `${v} mm`),
+    format: v => `${num(v, 1)} mm demand`, short: v => num(v, 1),
+  },
+  dSrad: {
+    cat: 'weather', name: 'Sunlight', unit: 'W/m², average incoming sunlight that day', kind: 'daily', worse: null,
+    get: (c, _k, _i, t) => dayValue(t, 'srad', c),
+    bins: () => seqBins([100, 175, 250, 300], RAMP.gold, String),
+    format: v => `${num(v)} W/m² sunlight`, short: v => num(v),
+  },
+  dWind: {
+    cat: 'weather', name: 'Wind', unit: 'm/s, average wind speed at 2 m', kind: 'daily', worse: 'high',
+    get: (c, _k, _i, t) => dayValue(t, 'wind', c),
+    bins: () => seqBins([2, 4, 6, 8], RAMP.purple, v => `${v} m/s`),
+    format: v => `${num(v, 1)} m/s wind`, short: v => num(v, 1),
+  },
+  dRh: {
+    cat: 'weather', name: 'Humidity', unit: '% relative humidity, daily average', kind: 'daily', worse: 'low',
+    get: (c, _k, _i, t) => dayValue(t, 'rh', c),
+    bins: () => seqBins([40, 55, 70, 85], RAMP.blue, v => `${v}%`),
+    format: v => `${num(v)}% humidity`, short: v => `${num(v)}%`,
+  },
+  dWb30: {
+    cat: 'drought', name: 'Water balance, last 30 days', unit: 'mm of rain minus crop water demand over the 30 days up to this date', kind: 'daily', worse: 'low',
+    get: (c, _k, _i, t) => dayValue(t, 'wb30', c),
+    bins: () => divBins([25, 75, 150], RAMP.divDry, RAMP.divWet, v => `${signed(v)} mm`),
+    format: v => `${signed(v)} mm water balance (30 days)`, short: v => `${signed(v)} mm`,
+  },
+  dWbAnom: {
+    cat: 'drought', name: 'Water balance vs normal', unit: 'mm wetter or drier than the normal 30-day water balance for this date', kind: 'daily', worse: 'low',
+    get: (c, _k, _i, t) => { const v = dayValue(t, 'wb30', c), n = normalValue(t, 'wb30', c); return v == null || n == null ? null : v - n; },
+    bins: () => divBins([15, 40, 80], RAMP.divDry, RAMP.divWet, v => `${signed(v)} mm`),
+    format: v => `${signed(v)} mm vs normal`, short: v => `${signed(v)} mm`,
+  },
+  dSoil: {
+    cat: 'drought', name: 'Soil moisture', unit: 'root-zone soil wetness, 0 (dry) to 100 (saturated)', kind: 'daily', worse: 'low',
+    get: (c, _k, _i, t) => dayValue(t, 'soil', c),
+    bins: () => seqBins([25, 35, 45, 60], RAMP.teal, v => `${v}%`),
+    format: v => `${num(v)}% soil wetness`, short: v => `${num(v)}%`,
+  },
+  dSoilAnom: {
+    cat: 'drought', name: 'Soil moisture vs normal', unit: 'points wetter or drier than normal soil wetness for this date', kind: 'daily', worse: 'low',
+    get: (c, _k, _i, t) => { const v = dayValue(t, 'soil', c), n = normalValue(t, 'soil', c); return v == null || n == null ? null : v - n; },
+    bins: () => divBins([3, 8, 15], RAMP.divDry, RAMP.divWet, v => `${signed(v)} pts`),
+    format: v => `${signed(v)} points vs normal`, short: v => signed(v),
+  },
+  insMonth: {
+    cat: 'crops', name: 'Insurance payouts this month', unit: 'USD paid for crop losses that happened in this calendar month', kind: 'daily', worse: 'high',
+    get: (c, k, _i, t) => { if (!t) return null; const d = dateOf(t.day); return insuranceMonth(c, k, FIRST_YEAR, d.getUTCFullYear(), d.getUTCMonth() + 1); },
+    bins: () => moneyBins([1e4, 1e5, 1e6, 5e6]),
+    format: v => (v > 0 ? `${money(v)} paid for this month's losses` : 'No payouts for this month'), short: v => (v > 0 ? money(v) : '$0'),
+  },
   // ---- Season and yearly layers ----
   anom: {
     cat: 'crops', name: 'Yield vs trend', unit: '% above or below the county trend', kind: 'yield', worse: 'low',
@@ -166,6 +228,30 @@ export const METRICS = {
     get: production,
     bins: k => seqBins(PROD_CUTS[k], RAMP.gold, String),
     format: v => `${millions(v)}M bu`, short: millions,
+  },
+  insPerAcre: {
+    cat: 'crops', name: 'Insurance payouts per acre', unit: 'USD of crop insurance paid per planted acre, all causes', kind: 'insurance', worse: 'high',
+    get: (c, k, i) => { const s = insuranceSeason(c, k, i), ap = c.d[k]?.ap[i]; return s == null || !ap ? null : s.total / ap; },
+    bins: () => moneyBins([5, 20, 50, 100]),
+    format: v => (v > 0 ? `${money(v)} per planted acre` : 'No payouts'), short: v => (v > 0 ? money(v) : '$0'),
+  },
+  insTotal: {
+    cat: 'crops', name: 'Insurance payouts', unit: 'USD of crop insurance paid for the season, all causes', kind: 'insurance', worse: 'high',
+    get: (c, k, i) => insuranceSeason(c, k, i)?.total ?? null,
+    bins: () => moneyBins([1e5, 1e6, 5e6, 2e7]),
+    format: v => (v > 0 ? `${money(v)} in payouts` : 'No payouts'), short: v => (v > 0 ? money(v) : '$0'),
+  },
+  insDrought: {
+    cat: 'crops', name: 'Drought payouts', unit: 'USD of crop insurance paid for drought losses', kind: 'insurance', worse: 'high',
+    get: (c, k, i) => insuranceSeason(c, k, i)?.byGroup[0] ?? null,
+    bins: () => moneyBins([1e5, 1e6, 5e6, 2e7]),
+    format: v => (v > 0 ? `${money(v)} for drought` : 'No drought payouts'), short: v => (v > 0 ? money(v) : '$0'),
+  },
+  insCause: {
+    cat: 'crops', name: 'Main cause of loss', unit: 'the cause behind most of the season’s insurance payouts', kind: 'insurance', worse: null,
+    get: (c, k, i) => mainCause(insuranceSeason(c, k, i)),
+    bins: () => [{ color: NEUTRAL, test: (v: number) => v < 0, label: 'No payouts' }, ...LOSS_LABEL.map((label, j) => ({ color: LOSS_COLOR[j], label, test: (v: number) => v === j }))],
+    format: v => (v < 0 ? 'No payouts' : `Mostly ${LOSS_LABEL[v].toLowerCase()}`), short: v => (v < 0 ? 'None' : LOSS_LABEL[v]),
   },
   sev: {
     cat: 'drought', name: 'Worst drought level', unit: 'Drought Monitor category in the growing season', kind: 'season', worse: 'high',
@@ -364,6 +450,7 @@ export const HEIGHTS = {
   heat: { name: 'Days at 35 °C or hotter', get: (c, k, i) => season(c, k, i, 'ht'), max: () => 30 },
   yield: { name: 'Yield', get: (c, k, i) => reported(c, k, i, 'y'), max: k => ({ C: 240, S: 70, W: 90, G: 130 })[k] },
   prod: { name: 'Production', get: production, max: k => ({ C: 40, S: 8, W: 3, G: 1.5 })[k] },
+  insPerAcre: { name: 'Insurance payouts per acre', get: (c, k, i) => { const s = insuranceSeason(c, k, i), ap = c.d[k]?.ap[i]; return s == null || !ap ? null : s.total / ap; }, max: () => 150 },
   storms: { name: 'Damaging storm reports', get: (c, k, i) => storm(c, k, i).damaging, max: () => 16 },
   droughty: { name: 'Drought-prone soil', get: c => c.dr, max: () => 100 },
   greenDrop: { name: 'Greenness drop', get: (c, _k, i) => loss(c.md?.na[i] ?? null), max: () => 12 },
@@ -377,6 +464,7 @@ export const height = (id: HeightId): HeightLayer => HEIGHTS[id];
 export function whyMissing(c: County, id: MetricId, k: CropKey, i: number): string {
   const m = metric(id), d = c.d[k];
   if (m.kind === 'daily') return id === 'dGdd' || id === 'dHot' ? (k === 'W' ? 'Not yet available for winter wheat' : 'Outside the growing season') : 'No value on this date';
+  if (m.kind === 'insurance') return !d ? `No ${CROP_NAME[k]} grown here` : id === 'insPerAcre' ? 'No planted acres reported' : 'No value this season';
   if (m.kind === 'soil') return 'No soil data for this county';
   if (m.kind === 'derived') return 'No weather record for this county';
   if (m.kind === 'freeze') return id === 'springRain' ? 'No weather record' : 'No freeze this year';

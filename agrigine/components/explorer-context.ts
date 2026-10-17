@@ -2,7 +2,7 @@
 import { createContext, useContext, useSyncExternalStore, type Dispatch } from 'react';
 import type { Action, ExplorerState } from '@/lib/state';
 import type { DayContext } from '@/lib/daily';
-import type { Bundle, County, StateCode } from '@/lib/types';
+import type { Bundle, City, County, StateCode } from '@/lib/types';
 
 export interface ExplorerApi {
   bundle: Bundle;
@@ -15,6 +15,7 @@ export interface ExplorerApi {
   dispatch: Dispatch<Action>;
   selectCounty: (fips: string) => void;
   selectState: (code: StateCode) => void;
+  selectCity: (city: City) => void;
   zoomToCounty: () => void;
 }
 

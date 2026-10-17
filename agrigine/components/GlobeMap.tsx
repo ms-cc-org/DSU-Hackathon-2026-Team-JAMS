@@ -1,10 +1,11 @@
 'use client';
 import { AmbientLight, COORDINATE_SYSTEM, FlyToInterpolator, LightingEffect, MapView, _CameraLight as CameraLight, _GlobeView as GlobeView, type Color, type PickingInfo } from '@deck.gl/core';
 import { TileLayer } from '@deck.gl/geo-layers';
-import { BitmapLayer, GeoJsonLayer, PathLayer, PolygonLayer, SolidPolygonLayer, TextLayer } from '@deck.gl/layers';
+import { BitmapLayer, GeoJsonLayer, PathLayer, PolygonLayer, ScatterplotLayer, SolidPolygonLayer, TextLayer } from '@deck.gl/layers';
 import DeckGL from '@deck.gl/react';
 import type { Feature } from 'geojson';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import type { City } from '@/lib/types';
 import { MAP, rgb } from '@/lib/colors';
 import type { MapStyle, Ring } from '@/lib/compute';
 import { CROP_NAME, STATES, STATE_BY_FIPS, STATE_CODES, STATE_VIEW } from '@/lib/constants';
@@ -37,11 +38,9 @@ const OCEAN: [number, number][][] = [[[-180, 90], [0, 90], [180, 90], [180, -90]
 export const IMAGERY_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 export const IMAGERY_CREDIT = 'Imagery: Esri, Maxar, Earthstar Geographics, and the GIS User Community';
 const MATERIAL = { ambient: 0.62, diffuse: 0.5, shininess: 10, specularColor: [30, 30, 30] as [number, number, number] };
-const CONTROLLER = { scrollZoom: { speed: 0.01, smooth: true }, dragRotate: true, touchRotate: true, doubleClickZoom: true, inertia: true };
-const TOOLTIP_STYLE = {
-  background: '#FFFFFF', color: '#14201A', borderRadius: '10px', padding: '8px 10px',
-  boxShadow: '0 2px 12px rgba(11,21,32,.3)', fontFamily: 'inherit', fontSize: '12px', maxWidth: '260px',
-};
+// Drag spins the globe with momentum; right-drag or Shift-drag tilts and rotates; scroll zooms toward the pointer.
+// The keyboard is handled by the explorer so it works the same in globe and map views.
+const CONTROLLER = { scrollZoom: { speed: 0.02, smooth: true }, dragPan: true, dragRotate: true, touchZoom: true, touchRotate: true, doubleClickZoom: true, keyboard: false, inertia: 450 };
 /** Height in meters for a full-height county: about 28 px on screen up close, capped at 150 km so it never spikes off the globe. */
 export const elevationFor = (zoom: number) => Math.min(3.2e6 / 2 ** zoom, 1.5e5);
 /** Satellite tiles stop at 85° north and south; these caps fill the gap in a color that blends with the polar water. */
@@ -61,12 +60,27 @@ interface Props {
   camera: Camera;
   reduced: boolean;
   onView: (v: ViewSnapshot) => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
 }
 
-export default function GlobeMap({ style, rings, outlines, camera, reduced, onView }: Props) {
-  const { s, i, t, byFips, dispatch, selectCounty, selectState } = useExplorer();
+export default function GlobeMap({ style, rings, outlines, camera, reduced, onView, onKeyDown }: Props) {
+  const { s, i, t, bundle, byFips, dispatch, selectCounty, selectState, selectCity } = useExplorer();
   const [failed, setFailed] = useState(false);
   const [elevation, setElevation] = useState(() => elevationFor(camera.zoom));
+  const [zoom, setZoom] = useState(camera.zoom);
+  // Camera moves made in code (search, fly-to, reset) can land without a view-state event, so follow them here too.
+  const [seenCamera, setSeenCamera] = useState(camera);
+  if (seenCamera !== camera) {
+    setSeenCamera(camera);
+    setZoom(camera.zoom);
+    setElevation(elevationFor(camera.zoom));
+  }
+  // Bigger places first: cities over 500,000 from far out, every town once you're close.
+  const minPopulation = zoom < 4 ? 500000 : zoom < 5 ? 150000 : zoom < 6 ? 40000 : zoom < 7 ? 10000 : zoom < 8 ? 2500 : 0;
+  const cities = useMemo(
+    () => (bundle.cities ?? []).filter(c => c[5] >= minPopulation && s.states.includes(c[1])),
+    [bundle, minPopulation, s.states],
+  );
   // deck.gl draws text into its own atlas, so it needs the resolved font name rather than the CSS variable.
   const [font] = useState(() => getComputedStyle(document.body).fontFamily || 'system-ui, sans-serif');
 
@@ -78,6 +92,7 @@ export default function GlobeMap({ style, rings, outlines, camera, reduced, onVi
   const initialViewState = useMemo(
     () => ({
       longitude: camera.longitude, latitude: camera.latitude, zoom: camera.zoom, pitch: camera.pitch, bearing: camera.bearing,
+      minZoom: 0.4, maxZoom: 12, maxPitch: 70,
       transitionDuration: reduced ? 0 : camera.duration,
       transitionInterpolator: camera.duration && !reduced ? new FlyToInterpolator() : undefined,
       nonce: camera.nonce,
@@ -156,6 +171,20 @@ export default function GlobeMap({ style, rings, outlines, camera, reduced, onVi
         id: 'selection', data: selRings, getPath: r => lifted(r, selZ), getColor: withAlpha(MAP.ink, 255),
         getWidth: 3, widthUnits: 'pixels', jointRounded: true, updateTriggers: { getPath: selZ },
       }),
+      s.refs.cities && cities.length > 0 && new ScatterplotLayer<City>({
+        id: 'city-dots', data: cities, getPosition: d => [d[3], d[4], lift], getRadius: d => (d[5] >= 100000 ? 4.5 : 3), radiusUnits: 'pixels',
+        getFillColor: sat ? [255, 255, 255, 240] : [20, 32, 26, 235], stroked: true, getLineColor: sat ? [20, 32, 26, 220] : [255, 255, 255, 230],
+        lineWidthUnits: 'pixels', getLineWidth: 1.2, pickable: true, parameters: { depthCompare: 'always', depthWriteEnabled: false },
+        updateTriggers: { getFillColor: sat, getLineColor: sat, getPosition: lift },
+      }),
+      s.refs.cities && cities.length > 0 && new TextLayer<City>({
+        id: 'city-names', data: cities, getPosition: d => [d[3], d[4], lift], getText: d => d[0],
+        getSize: d => (d[5] >= 100000 ? 14 : d[5] >= 20000 ? 12.5 : 11), sizeUnits: 'pixels', getPixelOffset: [7, 0],
+        getTextAnchor: 'start', getAlignmentBaseline: 'center', fontFamily: font, fontWeight: 600, characterSet: 'auto',
+        fontSettings: { sdf: true }, outlineWidth: 3, outlineColor: sat ? [11, 21, 32, 230] : [255, 255, 255, 235],
+        getColor: sat ? [255, 255, 255, 245] : [20, 32, 26, 240], parameters: { depthCompare: 'always', depthWriteEnabled: false },
+        updateTriggers: { getColor: sat, getPosition: lift },
+      }),
       labels.length > 0 && new TextLayer<Label>({
         id: 'labels', data: labels, getPosition: d => d.position as [number, number, number], getText: d => d.text, getSize: d => d.size, sizeUnits: 'pixels',
         getColor: sat ? [255, 255, 255, 245] : withAlpha(MAP.ink, 235), fontFamily: font, fontWeight: 700, characterSet: 'auto',
@@ -165,17 +194,19 @@ export default function GlobeMap({ style, rings, outlines, camera, reduced, onVi
         getTextAnchor: 'middle', getAlignmentBaseline: 'center', updateTriggers: { getPosition: `${selZ}|${lift}`, getColor: sat },
       }),
     ];
-  }, [s.mode, s.metric, s.height, s.crop, s.day, s.hidden, s.states, s.reportedOnly, s.refs, s.county, style, rings, outlines, elevation, font, byFips, reduced]);
+  }, [cities, s.mode, s.metric, s.height, s.crop, s.day, s.hidden, s.states, s.reportedOnly, s.refs, s.county, style, rings, outlines, elevation, font, byFips, reduced]);
 
-  const getTooltip = ({ object, layer }: PickingInfo) => {
+  /** The hover card's HTML for whatever is under the pointer, or null. */
+  const tooltipHtml = ({ object, layer }: PickingInfo): string | null => {
     if (!object || !layer) return null;
     if (layer.id === 'us-states') {
       const f = object as Feature;
       if (STATE_BY_FIPS[String(f.id)]) return null;
-      return {
-        html: `<b style="font-size:13px">${esc(String(f.properties?.name ?? ''))}</b><div style="color:#66716A">Not in the hackathon data. Agrigine covers California, Delaware, Iowa and Nebraska.</div>`,
-        style: TOOLTIP_STYLE,
-      };
+      return `<b>${esc(String(f.properties?.name ?? ''))}</b><div class="dim">Not in the hackathon data. Agrigine covers California, Delaware, Iowa and Nebraska.</div>`;
+    }
+    if (layer.id === 'city-dots') {
+      const city = object as City, home = byFips.get(city[2]);
+      return `<b>${esc(city[0])}, ${STATES[city[1]]}</b><div>${num(city[5])} people (2024 estimate)</div><div class="dim">${home ? esc(home.n) + ' County · ' : ''}click to open the county</div>`;
     }
     if (layer.id !== 'counties') return null;
     const c = byFips.get((object as Ring).f);
@@ -183,17 +214,33 @@ export default function GlobeMap({ style, rings, outlines, camera, reduced, onVi
     if (!c || !st) return null;
     const m = metric(s.metric), h = height(s.height);
     const when = m.kind === 'daily' ? formatDay(s.day) : m.fixed ? 'Soil' : `${s.year} ${CROP_NAME[s.crop]} season`;
-    let html = `<b style="font-size:13px">${esc(c.n)} County, ${c.s}</b><div style="color:#66716A">${when}</div>`;
+    let html = `<b>${esc(c.n)} County, ${c.s}</b><div class="dim">${when}</div>`;
     html += `<div style="margin-top:4px;display:flex;gap:6px;align-items:center"><i style="width:10px;height:10px;border-radius:2px;background:${st.color ?? '#F1EFE6'};box-shadow:inset 0 0 0 1px rgba(20,32,26,.25)"></i>${esc(m.name)}: <b>${esc(st.value != null ? m.format(st.value) : whyMissing(c, s.metric, s.crop, i))}</b></div>`;
     const hv = h.get?.(c, s.crop, i, t);
     if (hv != null) html += `<div>Height: ${esc(h.name)}, ${num(hv, hv % 1 && hv < 10 ? 1 : 0)}</div>`;
-    html += '<div style="color:#66716A;margin-top:4px">Click for the full profile</div>';
-    return { html, style: TOOLTIP_STYLE };
+    html += '<div class="dim" style="margin-top:4px">Click for the full profile</div>';
+    return html;
+  };
+
+  // Our own hover card, placed right beside the pointer and flipped to stay inside the map.
+  const tipRef = useRef<HTMLDivElement>(null);
+  const hideTip = () => { if (tipRef.current) tipRef.current.hidden = true; };
+  const onHover = (info: PickingInfo) => {
+    const el = tipRef.current;
+    const html = el && tooltipHtml(info);
+    if (!el || !html) return hideTip();
+    if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+    el.hidden = false;
+    const box = el.parentElement!.getBoundingClientRect(), gap = 14;
+    const x = info.x + gap + el.offsetWidth > box.width - 8 ? info.x - gap - el.offsetWidth : info.x + gap;
+    const y = info.y + gap + el.offsetHeight > box.height - 8 ? info.y - gap - el.offsetHeight : info.y + gap;
+    el.style.transform = `translate(${Math.max(4, x)}px, ${Math.max(4, y)}px)`;
   };
 
   const onClick = ({ object, layer }: PickingInfo) => {
     if (!object || !layer) return;
     if (layer.id === 'counties') selectCounty((object as Ring).f);
+    else if (layer.id === 'city-dots') selectCity(object as City);
     else if (layer.id === 'us-states') {
       const f = object as Feature;
       const code = STATE_BY_FIPS[String(f.id)];
@@ -205,24 +252,35 @@ export default function GlobeMap({ style, rings, outlines, camera, reduced, onVi
   if (failed) return <div className="map-fallback">This browser blocked WebGL, so the globe can&apos;t draw. Search still opens every profile.</div>;
 
   return (
-    <div className="map">
+    <div
+      className="map"
+      tabIndex={0}
+      aria-label="Map. Drag to spin, right-drag to tilt and rotate, scroll to zoom. Arrow keys move, Shift and arrows rotate and tilt."
+      onKeyDown={onKeyDown}
+      onPointerDown={e => e.currentTarget.focus({ preventScroll: true })}
+      onContextMenu={e => e.preventDefault()}
+      onPointerLeave={hideTip}
+    >
       <DeckGL
         views={s.mode === 'globe' ? views.globe : views.map}
         initialViewState={initialViewState}
         controller={CONTROLLER}
         effects={effects}
         layers={layers}
-        getTooltip={getTooltip}
+        onHover={onHover}
         onClick={onClick}
         onError={() => setFailed(true)}
         onViewStateChange={({ viewState }) => {
           const v = viewState as ViewSnapshot;
+          hideTip();
           onView({ longitude: v.longitude, latitude: v.latitude, zoom: v.zoom, pitch: v.pitch ?? 0, bearing: v.bearing ?? 0 });
           const next = elevationFor(v.zoom);
           setElevation(prev => (Math.abs(next - prev) / prev > 0.06 ? next : prev));
+          setZoom(prev => (Math.abs(prev - v.zoom) > 0.2 ? v.zoom : prev));
         }}
         getCursor={({ isDragging, isHovering }) => (isDragging ? 'grabbing' : isHovering ? 'pointer' : 'grab')}
       />
+      <div ref={tipRef} className="maptip" hidden role="tooltip" />
     </div>
   );
 }

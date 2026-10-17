@@ -73,10 +73,18 @@ export interface County {
   sw?: Partial<Record<CropKey, SeasonWeather>>;
   fz?: FreezeSeries;
   ev?: StormEvent[];
+  /** Crop insurance payouts by season and cause: [season-year index, crop, cause group, USD]; see lib/insurance.ts */
+  ins?: [number, number, number, number][];
+  /** Crop insurance payouts by month of loss: [crop, loss-year index, month, USD] */
+  insm?: [number, number, number, number][];
 }
+
+/** [name, state, county FIPS, longitude, latitude, population] */
+export type City = [string, StateCode, string, number, number, number];
 
 export interface Bundle {
   years: number[];
+  cities?: City[];
   weekStart: string;
   nWeeks: number;
   counties: County[];
