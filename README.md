@@ -4,28 +4,12 @@ An open-source research tool for county farm data that farmers can use too. Agri
 
 Built for the DSU *Data to Harvest* hackathon, October 17–18, 2026.
 
-## Hackathon submission
-
-**Team JAMS.** Hackathon directions, data dictionary and the dataset are in `docs/` and `data/`, unchanged from the starter.
-
-**User and decision (direction: Crop Loss Early Warning).** A **crop insurance office** deciding **which counties to inspect first on August 1**. Agrigine's day-by-day yield model gives each county's expected end-of-season yield against trend as of August 1; the office inspects the counties furthest below trend. The same tool also serves the Frost-Safe Planting Calendar (safe planting date per county), Drought Assistance Targeting (county report cards and the 4- and 8-week drought chance) and Grain Supply Outlook (1–3 year yield forecasts with ranges), each with its own held-out check.
-
-**Evidence, checked on years not used to build it.** On August 1 of each of 2016–2025, a watch list the same length as the usual "every county in D2+ on the last map before August 1" list caught **36% of real corn losses vs 33%** for the drought list, and **43% vs 40%** for soybeans (a real loss is a final yield 10% or more below trend; 211 corn and 190 soybean losses over the ten years). Each year was predicted by a model trained only on earlier seasons. Every other number the tool shows was tested the same way; the full tables, splits and parameters are in [BENCHMARKS.md](BENCHMARKS.md) and under *Predictive modeling* below. Where a model did not beat the simple baseline (in-season corn, wheat and sorghum yield), the tool says so and labels it experimental.
-
-**The tool.** A web app (Next.js) that the office uses without reading code: set the date to August 1 of any year, color the map by *Expected season yield*, and the counties below trend stand out; click one for its profile and the reasons (drought weeks, rain against normal, heat, soil moisture). Reports print the list with its evidence.
-- **Hosted:** <https://agrigine.pages.dev> (free static hosting; no sign-in needed to explore. Report and Predict ask for an account because they save to it.)
-- **Run locally:** `cd agrigine && npm install && npm run dev`, then open <http://localhost:3000>. Needs Node 20+. The data files are committed, so nothing has to be downloaded or rebuilt.
-- **Rebuild the data and models (optional):** `python3 agrigine/scripts/pull_all.py`, then run the three notebooks in `notebooks/` in order (see *How a forecast gets into the app*). Python 3.11+, packages in the notebook header.
-
-**Where to look.** `agrigine/` is the app; `notebooks/Agrigine_Daily_Predictions.ipynb` holds the August 1 test; `BENCHMARKS.md` the scores; `ARCHITECTURE.md` the design.
-
 <details>
 <summary><b>Codebase structure</b> (click to expand)</summary>
 
 ```text
 DSU-Hackathon/
-├── README.md                         # this file (hackathon submission section first)
-├── docs/hackathon-directions.md      # the official hackathon README from the starter repo
+├── README.md                         # this file
 ├── ARCHITECTURE.md                   # why the app is shaped this way: frontend, globe, backend, models, hosting
 ├── BENCHMARKS.md                     # every model's held-out test scores
 ├── data/                             # every data table; see "How the data is stored"
