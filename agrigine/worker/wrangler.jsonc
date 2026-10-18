@@ -5,7 +5,10 @@
   "compatibility_date": "2026-06-01",
   "vars": {
     // The Cloudflare Pages site whose /data files this server reads.
-    "DATA_BASE_URL": "https://agrigine.pages.dev"
+    "DATA_BASE_URL": "https://agrigine.pages.dev",
+    // The account functions (my_farms, my_records, my_reports) run in Supabase; the publishable key is public by design.
+    "SUPABASE_URL": "https://bjmpplomtvwcisbnijox.supabase.co",
+    "SUPABASE_ANON_KEY": "sb_publishable_8I-9dg-BPs95RQNyL2vdUw_77AVfIur"
   },
   "observability": { "enabled": true }
 }

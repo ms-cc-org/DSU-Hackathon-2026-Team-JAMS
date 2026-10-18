@@ -609,6 +609,16 @@ button.tl-date:hover, button.tl-date:focus-visible { border-bottom-color: var(--
 .farm-card h3 { margin: 0; font-size: 18px; }
 .farm-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .linkbtn.danger { color: var(--loss); }
+/* Profile: AI assistant keys */
+.prof-code { display: flex; align-items: center; gap: 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+.prof-code code { flex: 1; min-width: 0; font-size: 12.5px; overflow-wrap: anywhere; background: none; border: 0; padding: 0; }
+.prof-keyform { flex-direction: row; align-items: flex-end; flex-wrap: wrap; }
+.prof-keyform .rb-field { flex: 1; min-width: 200px; }
+.prof-fresh { display: flex; flex-direction: column; gap: 8px; border: 1.5px solid var(--accent); border-radius: 12px; padding: 12px 14px; }
+.prof-fresh p { margin: 0; }
+.prof-key { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.prof-key > span { display: flex; flex-direction: column; gap: 2px; }
+.prof-key > span > span { font-size: 12px; color: var(--muted); }
 .farm-form { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; }
 .farm-step { display: flex; flex-direction: column; gap: 6px; }
 .farm-label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }

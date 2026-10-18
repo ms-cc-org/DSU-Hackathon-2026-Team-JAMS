@@ -213,3 +213,28 @@ export async function listAllFarmModels(): Promise<SavedFarmModel[]> {
   fail(error);
   return (data ?? []) as SavedFarmModel[];
 }
+
+// ---------- personal keys for AI assistants (MCP) ----------
+
+export interface McpKey { id: string; label: string; created_at: string; last_used_at: string | null }
+
+export async function listMcpKeys(): Promise<McpKey[]> {
+  const { data, error } = await supabase().from('mcp_keys').select('id, label, created_at, last_used_at').order('created_at', { ascending: false });
+  fail(error);
+  return (data ?? []) as McpKey[];
+}
+
+/** Makes a key, stores only its SHA-256, and returns the key itself: the one time it can be seen. */
+export async function createMcpKey(label: string): Promise<string> {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  const key = 'agk_' + btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key));
+  const key_hash = [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+  const { error } = await supabase().from('mcp_keys').insert({ key_hash, label: label.trim().slice(0, 60) || 'AI assistant' });
+  fail(error);
+  return key;
+}
+
+export async function revokeMcpKey(id: string) {
+  fail((await supabase().from('mcp_keys').delete().eq('id', id)).error);
+}

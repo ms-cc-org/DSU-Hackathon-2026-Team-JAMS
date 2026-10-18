@@ -1,5 +1,5 @@
 // The MCP tools: read-only questions an AI assistant can ask about Agrigine's county data.
-import { loadCounty, loadDailyYear, loadIndex, loadNormals, loadSeason, type County, type CropKey, type Env, type Index } from './data';
+import { account, loadCounty, loadDailyYear, loadIndex, loadNormals, loadSeason, type County, type CropKey, type Ctx, type Env, type Index } from './data';
 
 const FIRST_YEAR = 2000, LAST_YEAR = 2025;
 const DAY0 = Date.UTC(2000, 0, 1), DAY = 864e5;
@@ -114,7 +114,9 @@ function storms(c: County, k: CropKey, y: number) {
 interface Tool {
   description: string;
   inputSchema: Record<string, unknown>;
-  run: (env: Env, args: Record<string, unknown>) => Promise<unknown>;
+  run: (env: Env, args: Record<string, unknown>, ctx: Ctx) => Promise<unknown>;
+  /** Reads the connected person's own data; needs a personal key. */
+  account?: boolean;
 }
 
 const PLACE = { type: 'string', description: 'A county ("Polk County, Iowa"), a city ("Ames, IA") or a 5-digit county FIPS code ("19153").' };
@@ -273,5 +275,37 @@ export const TOOLS: Record<string, Tool> = {
         .sort((p, q) => ((lowIsBad === worstFirst) ? p.value - q.value : q.value - p.value));
       return { state: STATES[st], crop: CROP_NAME[k], year: y, measure: m, order: worstFirst ? 'worst first' : 'best first', counties_with_data: ranked.length, ranking: ranked.slice(0, limit).map((r, j) => ({ rank: j + 1, ...r })), sources: SOURCES };
     },
+  },
+
+  // ---------- the connected person's own data (needs a personal key from the Profile page) ----------
+
+  my_farms: {
+    description: 'The connected person\'s farms (name, county FIPS, location) and the models they built from their own records, with each model\'s settings, how it tested (leave-one-season-out MAE and skill vs the farm\'s average) and its predicted yields for 2026–2028 with 80% ranges. Needs a personal key.',
+    inputSchema: { type: 'object', properties: {} },
+    account: true,
+    run: async (env, _a, ctx) => {
+      const farms = await account<Record<string, unknown>[]>(env, ctx, 'mcp_farms');
+      if (!farms.length) return { farms: [], note: 'No farms yet. Add one on the Predict page.' };
+      const ix = await loadIndex(env);
+      return { farms: farms.map(f => ({ ...f, county: (c => (c ? `${c.n} County, ${STATES[c.s]}` : null))(ix.counties.find(c => c.f === f.fips)) })) };
+    },
+  },
+
+  my_records: {
+    description: 'The connected person\'s own field records (field, county, crop, year, yield in bu/ac, acres, planting and harvest dates, irrigation, notes), optionally for one county and crop. Needs a personal key.',
+    inputSchema: { type: 'object', properties: { fips: { type: 'string', description: 'Optional 5-digit county FIPS code.' }, crop: { type: 'string', description: 'Optional: corn, soybeans, winter_wheat or sorghum.' } } },
+    account: true,
+    run: async (env, a, ctx) => {
+      const fips = a.fips == null ? null : String(a.fips), k = a.crop == null ? null : CROP_NAME[crop(a.crop)].replace('grain sorghum', 'sorghum').replace(' ', '_');
+      const records = await account<Record<string, unknown>[]>(env, ctx, 'mcp_records', { p_fips: fips, p_crop: k });
+      return { count: records.length, records: records.slice(0, 500), truncated: records.length > 500 };
+    },
+  },
+
+  my_reports: {
+    description: 'The connected person\'s saved Agrigine reports: title, places, crop, years, and the blocks in each. Needs a personal key.',
+    inputSchema: { type: 'object', properties: {} },
+    account: true,
+    run: async (env, _a, ctx) => ({ reports: await account<unknown[]>(env, ctx, 'mcp_reports') }),
   },
 };

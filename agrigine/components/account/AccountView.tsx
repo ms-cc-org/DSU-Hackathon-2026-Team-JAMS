@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { User } from '@supabase/supabase-js';
 import { useEffect, useState, type FormEvent } from 'react';
-import { farmSummary, listMyReports, setDisplayName, sharedWithMe, type AccountReport, type FarmSummary, type SharedReport } from '@/lib/account';
+import { createMcpKey, farmSummary, listMcpKeys, listMyReports, revokeMcpKey, setDisplayName, sharedWithMe, type AccountReport, type FarmSummary, type McpKey, type SharedReport } from '@/lib/account';
 import { finishRecovery, supabase, useAuth } from '@/lib/supabase';
 
 type Mode = 'signin' | 'signup' | 'reset';
@@ -174,8 +174,64 @@ function Profile({ user }: { user: User }) {
         </p>
       </section>
 
+      <Assistants />
       <Settings name={name} />
     </div>
+  );
+}
+
+const MCP_URL = 'https://agrigine-mcp.agrigine-mcp.workers.dev/mcp';
+
+/** Connecting an AI assistant: the server address, and personal keys that let it read this account's own data. */
+function Assistants() {
+  const [keys, setKeys] = useState<McpKey[] | null>(null);
+  const [label, setLabel] = useState('');
+  const [fresh, setFresh] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Message | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  const reload = () => listMcpKeys().then(setKeys).catch(e => setMsg({ tone: 'error', text: friendly(e) }));
+  useEffect(() => { reload(); }, []);
+  const make = async (e: FormEvent) => {
+    e.preventDefault();
+    try { setFresh(await createMcpKey(label)); setLabel(''); setMsg(null); reload(); } catch (err) { setMsg({ tone: 'error', text: friendly(err) }); }
+  };
+  const revoke = async (k: McpKey) => {
+    if (!window.confirm(`Revoke the key "${k.label}"? Assistants using it lose access to your data.`)) return;
+    try { await revokeMcpKey(k.id); if (fresh) setFresh(null); reload(); } catch (err) { setMsg({ tone: 'error', text: friendly(err) }); }
+  };
+  const copy = (text: string, what: string) => navigator.clipboard?.writeText(text).then(() => { setCopied(what); setTimeout(() => setCopied(null), 1500); });
+  const cmd = (key: string | null) => `claude mcp add --transport http agrigine ${MCP_URL}${key ? ` --header "Authorization: Bearer ${key}"` : ''}`;
+  return (
+    <section className="prof-sec">
+      <h2>AI assistants</h2>
+      <p className="acct-note">Connect Claude or any MCP client to Agrigine’s data. With a personal key it can also read <b>your</b> farms, field records, models and saved reports (tools <code>my_farms</code>, <code>my_records</code>, <code>my_reports</code>). Keys only read; nothing can be changed through them.</p>
+      <div className="prof-code"><code>{MCP_URL}</code><button type="button" className="linkbtn" onClick={() => copy(MCP_URL, 'url')}>{copied === 'url' ? 'Copied' : 'Copy'}</button></div>
+      <form onSubmit={make} className="acct-form prof-keyform">
+        <label className="rb-field"><span>New key for</span><input value={label} maxLength={60} placeholder="e.g. Claude on my laptop" onChange={e => setLabel(e.target.value)} /></label>
+        <button type="submit" className="btn primary">Create key</button>
+      </form>
+      {fresh && (
+        <div className="prof-fresh" role="status">
+          <p><b>Your new key. Copy it now; it is shown only once.</b></p>
+          <div className="prof-code"><code>{fresh}</code><button type="button" className="linkbtn" onClick={() => copy(fresh, 'key')}>{copied === 'key' ? 'Copied' : 'Copy'}</button></div>
+          <p className="acct-note">In Claude Code, one command connects it with your key:</p>
+          <div className="prof-code"><code>{cmd(fresh)}</code><button type="button" className="linkbtn" onClick={() => copy(cmd(fresh), 'cmd')}>{copied === 'cmd' ? 'Copied' : 'Copy'}</button></div>
+          <p className="acct-note">Other clients: add the server at the address above with the header <code>Authorization: Bearer &lt;key&gt;</code>.</p>
+        </div>
+      )}
+      {!fresh && <p className="acct-note">Without a key, assistants still get every county layer: <code>{cmd(null)}</code></p>}
+      <Note m={msg} />
+      {keys && keys.length > 0 && (
+        <ul className="prof-list">
+          {keys.map(k => (
+            <li key={k.id} className="prof-key">
+              <span><b>{k.label}</b><span>Created {day(k.created_at)}{k.last_used_at ? ` · last used ${day(k.last_used_at)}` : ' · never used'}</span></span>
+              <button type="button" className="linkbtn danger" onClick={() => revoke(k)}>Revoke</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

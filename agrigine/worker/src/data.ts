@@ -3,6 +3,32 @@
 
 export interface Env {
   DATA_BASE_URL: string;
+  /** Supabase project URL and publishable key: the account functions take a personal key and check it in the database. */
+  SUPABASE_URL: string;
+  SUPABASE_ANON_KEY: string;
+}
+
+/** Per-request context: the SHA-256 of the personal key sent as "Authorization: Bearer agk_...", if any. */
+export interface Ctx { keyHash: string | null }
+
+/** Calls one of the database's account functions (security definer, keyed by the personal key's hash). */
+export async function account<T>(env: Env, ctx: Ctx, fn: string, args: Record<string, unknown> = {}): Promise<T> {
+  if (!ctx.keyHash) throw new AccountError('This tool reads a person\'s own Agrigine data. Connect with a personal key from the Profile page: send it as "Authorization: Bearer agk_...".');
+  const res = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', apikey: env.SUPABASE_ANON_KEY, Authorization: `Bearer ${env.SUPABASE_ANON_KEY}` },
+    body: JSON.stringify({ p_hash: ctx.keyHash, ...args }),
+  });
+  if (res.status === 401 || res.status === 403 || (res.status === 400 && (await res.clone().text()).includes('unknown key'))) {
+    throw new AccountError('That personal key is not valid. It may have been revoked; make a new one on the Profile page.');
+  }
+  if (!res.ok) throw new Error(`account lookup failed (${res.status})`);
+  return res.json() as Promise<T>;
+}
+export class AccountError extends Error {}
+
+export async function sha256Hex(text: string) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 export type CropKey = 'C' | 'S' | 'W' | 'G';
