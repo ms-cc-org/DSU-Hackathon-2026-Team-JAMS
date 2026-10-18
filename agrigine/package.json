@@ -5,8 +5,10 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "start": "npx --yes serve@14 out -l 3123",
+    "lint": "eslint",
+    "deploy": "next build && npx --yes wrangler@4 pages deploy out --project-name agrigine --branch main",
+    "deploy:mcp": "cd worker && npm install && npx wrangler deploy"
   },
   "dependencies": {
     "@deck.gl/core": "9.4.0",

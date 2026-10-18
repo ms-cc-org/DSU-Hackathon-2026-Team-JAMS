@@ -4,14 +4,14 @@ import { TileLayer } from '@deck.gl/geo-layers';
 import { BitmapLayer, GeoJsonLayer, PathLayer, PolygonLayer, ScatterplotLayer, SolidPolygonLayer, TextLayer } from '@deck.gl/layers';
 import DeckGL from '@deck.gl/react';
 import type { Feature } from 'geojson';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { City } from '@/lib/types';
 import { MAP, rgb } from '@/lib/colors';
 import type { MapStyle, Ring } from '@/lib/compute';
 import { CROP_NAME, STATES, STATE_BY_FIPS, STATE_CODES, STATE_VIEW } from '@/lib/constants';
 import type { Outlines } from '@/lib/data';
 import { num } from '@/lib/format';
-import { formatDay } from '@/lib/daily';
+import { formatDay, isoDay } from '@/lib/daily';
 import { height, metric, whyMissing } from '@/lib/metrics';
 import { useExplorer } from './explorer-context';
 
@@ -35,8 +35,22 @@ interface Label {
 
 const OCEAN: [number, number][][] = [[[-180, 90], [0, 90], [180, 90], [180, -90], [0, -90], [-180, -90]]];
 /** Esri World Imagery: no key needed, credited in the explorer's attribution line. */
-export const IMAGERY_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-export const IMAGERY_CREDIT = 'Imagery: Esri, Maxar, Earthstar Geographics, and the GIS User Community';
+// NASA GIBS imagery: free, public domain, no key. Blue Marble is a cloud-free mosaic for the zoomed-out globe;
+// Landsat WELD is a 30 m cloud-free composite for county and field detail; MODIS Terra is the photo of a given day.
+const GIBS = 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best';
+const BLUE_MARBLE_URL = `${GIBS}/BlueMarble_NextGeneration/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpg`;
+const LANDSAT_URL = `${GIBS}/Landsat_WELD_CorrectedReflectance_TrueColor_Global_Annual/default/2000-12-01/GoogleMapsCompatible_Level12/{z}/{y}/{x}.jpg`;
+const dayPhotoUrl = (date: string) => `${GIBS}/MODIS_Terra_CorrectedReflectance_TrueColor/default/${date}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`;
+export const IMAGERY_CREDIT = 'Imagery: NASA Blue Marble, Landsat WELD and MODIS via NASA GIBS';
+
+/** One tiled imagery layer. Tiles are Web Mercator images; _imageCoordinateSystem lets the globe bend them. */
+const imagery = (id: string, data: string, minZoom: number, maxZoom: number) => new TileLayer<ImageBitmap>({
+  id, data, minZoom, maxZoom, tileSize: 256, maxRequests: 12,
+  renderSubLayers: props => {
+    const [[west, south], [east, north]] = props.tile.boundingBox;
+    return new BitmapLayer({ id: props.id, image: props.data, bounds: [west, south, east, north], _imageCoordinateSystem: COORDINATE_SYSTEM.CARTESIAN });
+  },
+});
 const MATERIAL = { ambient: 0.62, diffuse: 0.5, shininess: 10, specularColor: [30, 30, 30] as [number, number, number] };
 // Drag spins the globe with momentum; right-drag or Shift-drag tilts and rotates; scroll zooms toward the pointer.
 // The keyboard is handled by the explorer so it works the same in globe and map views.
@@ -68,6 +82,13 @@ export default function GlobeMap({ style, rings, outlines, camera, reduced, onVi
   const [failed, setFailed] = useState(false);
   const [elevation, setElevation] = useState(() => elevationFor(camera.zoom));
   const [zoom, setZoom] = useState(camera.zoom);
+  // The day's satellite photo follows the dial once it rests, so dragging doesn't fetch a new image per day.
+  const [photoDate, setPhotoDate] = useState(() => isoDay(s.day));
+  useEffect(() => {
+    if (!s.refs.dayphoto) return;
+    const timer = setTimeout(() => setPhotoDate(isoDay(s.day)), 600);
+    return () => clearTimeout(timer);
+  }, [s.day, s.refs.dayphoto]);
   // Camera moves made in code (search, fly-to, reset) can land without a view-state event, so follow them here too.
   const [seenCamera, setSeenCamera] = useState(camera);
   if (seenCamera !== camera) {
@@ -121,14 +142,10 @@ export default function GlobeMap({ style, rings, outlines, camera, reduced, onVi
         // Under imagery the backdrop must never hide a tile, so it doesn't claim depth.
         parameters: sat ? { depthWriteEnabled: false } : {},
       }),
-      sat && new TileLayer<ImageBitmap>({
-        id: 'imagery', data: IMAGERY_URL, minZoom: 0, maxZoom: 17, tileSize: 256, maxRequests: 12,
-        renderSubLayers: props => {
-          const [[west, south], [east, north]] = props.tile.boundingBox;
-          // Tiles are Web Mercator images; this lets the globe bend them correctly.
-          return new BitmapLayer({ id: props.id, image: props.data, bounds: [west, south, east, north], _imageCoordinateSystem: COORDINATE_SYSTEM.CARTESIAN });
-        },
-      }),
+      sat && imagery('imagery', BLUE_MARBLE_URL, 0, 8),
+      // Landsat takes over once a few states fill the screen; below zoom 6 it loads nothing.
+      sat && imagery('imagery-landsat', LANDSAT_URL, 6, 12),
+      sat && s.refs.dayphoto && imagery('imagery-day', dayPhotoUrl(photoDate), 0, 9),
       sat && s.mode === 'globe' && new SolidPolygonLayer({ id: 'poles', data: POLES, getPolygon: d => d, getFillColor: [22, 46, 70], material: false, parameters: { depthWriteEnabled: false } }),
       !sat && outlines && new GeoJsonLayer({ id: 'land', data: outlines.land, filled: true, stroked: false, getFillColor: MAP.land, material: false }),
       // Nearly invisible, but pickable: clicking a state says whether Agrigine covers it.
@@ -194,7 +211,7 @@ export default function GlobeMap({ style, rings, outlines, camera, reduced, onVi
         getTextAnchor: 'middle', getAlignmentBaseline: 'center', updateTriggers: { getPosition: `${selZ}|${lift}`, getColor: sat },
       }),
     ];
-  }, [cities, s.mode, s.metric, s.height, s.crop, s.day, s.hidden, s.states, s.reportedOnly, s.refs, s.county, style, rings, outlines, elevation, font, byFips, reduced]);
+  }, [photoDate, cities, s.mode, s.metric, s.height, s.crop, s.day, s.hidden, s.states, s.reportedOnly, s.refs, s.county, style, rings, outlines, elevation, font, byFips, reduced]);
 
   /** The hover card's HTML for whatever is under the pointer, or null. */
   const tooltipHtml = ({ object, layer }: PickingInfo): string | null => {

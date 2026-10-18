@@ -9,6 +9,7 @@ import { initialState, reducer, toSearch, type MapMode } from '@/lib/state';
 import type { Bundle, City, StateCode } from '@/lib/types';
 import { ExplorerContext, NARROW_QUERY, useNarrow, useReducedMotion, type ExplorerApi } from './explorer-context';
 import GlobeMap, { IMAGERY_CREDIT, type Camera, type ViewSnapshot } from './GlobeMap';
+import { LAST_VIEW_KEY } from './NavSwitch';
 import { GlobeIcon, MapIcon, ResetIcon } from './icons';
 import LayersPanel from './LayersPanel';
 import LoadingShell from './LoadingShell';
@@ -163,6 +164,7 @@ function ExplorerReady({ bundle, outlines }: { bundle: Bundle; outlines: Outline
     const timer = setTimeout(() => {
       const q = toSearch(s);
       if (window.location.search.slice(1) !== q) window.history.replaceState(null, '', `${window.location.pathname}?${q}`);
+      try { sessionStorage.setItem(LAST_VIEW_KEY, `?${q}`); } catch {}
     }, 400);
     return () => clearTimeout(timer);
   }, [s]);

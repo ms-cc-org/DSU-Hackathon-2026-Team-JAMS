@@ -1,0 +1,11 @@
+{
+  // Agrigine's MCP server. Free tier: 100,000 requests a day, 10 ms of CPU each.
+  "name": "agrigine-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "vars": {
+    // The Cloudflare Pages site whose /data files this server reads.
+    "DATA_BASE_URL": "https://agrigine.pages.dev"
+  },
+  "observability": { "enabled": true }
+}

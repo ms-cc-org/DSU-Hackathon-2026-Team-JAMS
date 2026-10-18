@@ -15,6 +15,7 @@ const CONDITIONS: { id: ConditionId; label: string }[] = [
 
 const REFS: { id: RefLayer; label: string }[] = [
   { id: 'imagery', label: 'Satellite imagery' },
+  { id: 'dayphoto', label: 'Satellite photo of this date (clouds and all)' },
   { id: 'cities', label: 'City and town names' },
   { id: 'borders', label: 'Country borders and coastlines' },
   { id: 'states', label: 'State borders' },

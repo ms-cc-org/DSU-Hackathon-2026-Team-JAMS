@@ -89,6 +89,12 @@ function loadNormals() {
   return normalsPending;
 }
 
+/** A year's daily weather and the normals, for code outside a component (the report CSV export). */
+export async function loadDailyYear(year: number) {
+  await Promise.all([load(year), loadNormals()]);
+  return { data: loaded.get(year) ?? null, normals };
+}
+
 /** The selected year's daily weather (null while it loads), with the years either side fetched ahead. */
 export function useDaily(year: number) {
   const [, rerender] = useState(0);

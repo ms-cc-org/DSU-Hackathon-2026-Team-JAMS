@@ -357,3 +357,129 @@ dl.facts .sub { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
 .maptip[hidden] { display: none; }
 .maptip b:first-child { font-size: 13px; }
 .maptip .dim { color: #66716A; }
+
+/* ---------- Report builder ---------- */
+.rb-page { height: 100dvh; display: flex; flex-direction: column; }
+.rb-loading { margin: 40px auto; color: var(--muted); }
+.rb { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); }
+.rb-side { overflow-y: auto; background: var(--surface); border-right: 1px solid var(--line); padding: 4px 16px 32px; }
+.rb-sec { display: flex; flex-direction: column; gap: 10px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.rb-sec:last-child { border-bottom: 0; }
+.rb-sec h2 { margin: 0; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.rb-sec h3 { margin: 6px 0 0; font-size: 12px; color: var(--ink-2); }
+.rb-count { margin-left: auto; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.rb-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--ink-2); min-width: 0; }
+.rb-field input, .rb-field select, .rb-field textarea { font: inherit; font-size: 14px; font-weight: 400; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; min-width: 0; }
+.rb-field textarea { resize: vertical; line-height: 1.45; }
+.rb-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.rb-templates { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.rb-templates button, .rb-add button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font: inherit; cursor: pointer; }
+.rb-templates button:hover, .rb-add button:hover { border-color: var(--accent); }
+.rb-templates b, .rb-add b { font-size: 13px; }
+.rb-templates span, .rb-add span { font-size: 11.5px; color: var(--muted); line-height: 1.35; }
+.rb-add { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.rb-saved, .rb-places, .rb-blocks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.rb-saved li { display: flex; align-items: center; gap: 4px; border-radius: 8px; }
+.rb-saved li[aria-current] { background: var(--sel-band); }
+.rb-open { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; border: 0; background: none; padding: 6px 8px; text-align: left; color: var(--ink); font: inherit; cursor: pointer; }
+.rb-open b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.rb-open span { font-size: 11.5px; color: var(--muted); }
+.rb-places li { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 4px 4px 4px 8px; border: 1px solid var(--line); border-radius: 8px; }
+.rb-places li i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.rb-places li .rb-x { margin-left: auto; }
+.rb-x { flex: none; width: 26px; height: 26px; border-radius: 6px; border: 0; background: none; color: var(--ink-2); font-size: 15px; cursor: pointer; display: grid; place-items: center; }
+.rb-x:hover:not(:disabled) { background: var(--surface-2); color: var(--ink); }
+.rb-x:disabled { opacity: .3; cursor: default; }
+.rb-block { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.rb-block-head { display: flex; align-items: center; gap: 2px; padding: 3px 4px 3px 0; }
+.rb-block-name { flex: 1; display: flex; align-items: center; gap: 6px; border: 0; background: none; padding: 6px 10px; text-align: left; font: inherit; font-size: 13px; font-weight: 700; color: var(--ink); cursor: pointer; }
+.rb-block-name:disabled { cursor: default; color: var(--ink); }
+.rb-block-name span { color: var(--muted); font-size: 11px; }
+.rb-block-body { padding: 4px 10px 12px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); }
+.rb-checks { max-height: 240px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.rb-checks fieldset { border: 0; margin: 0 0 6px; padding: 0; }
+.rb-checks legend { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 4px 0 2px; }
+.rb-checks label { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 2px 0; }
+.rb-main { overflow-y: auto; background: var(--bg); padding: 0 24px 48px; }
+.rb-actions { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 12px 0; background: var(--bg); max-width: 816px; margin: 0 auto; }
+.rb-status { margin-right: auto; font-size: 12px; color: var(--muted); }
+.btn { font: inherit; font-size: 13px; font-weight: 600; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink); cursor: pointer; }
+.btn:hover:not(:disabled) { border-color: var(--accent); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.rb button:focus-visible, .rb input:focus-visible, .rb select:focus-visible, .rb textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The report itself is paper: white with fixed ink in both themes, the same on screen and in print. */
+.rdoc { --p-ink: #14201A; --p-ink-2: #3D4A42; --p-muted: #66716A; --p-line: #E3E6E1; max-width: 816px; margin: 0 auto; background: #FFFFFF; color: var(--p-ink); border-radius: 4px; box-shadow: 0 1px 3px rgba(11, 21, 32, .12), 0 8px 28px rgba(11, 21, 32, .12); padding: 48px 56px 36px; display: flex; flex-direction: column; gap: 30px; }
+.rdoc-head { display: flex; flex-direction: column; gap: 6px; border-bottom: 3px solid var(--p-ink); padding-bottom: 18px; }
+.rdoc-eyebrow { margin: 0; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--p-muted); }
+.rdoc h1 { margin: 0; font: 800 44px/1 var(--f-display); letter-spacing: .005em; text-wrap: balance; }
+.rdoc-meta { margin: 0; font-size: 13px; color: var(--p-muted); }
+.rdoc-places { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; font-weight: 600; }
+.rdoc-places li, .r-place { display: inline-flex; align-items: center; gap: 6px; }
+.rdoc-places i, .r-place i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.rsec { display: flex; flex-direction: column; gap: 10px; }
+.rsec h2 { margin: 0; font-size: 18px; line-height: 1.25; text-wrap: balance; }
+.rsec h3 { margin: 8px 0 0; font-size: 13px; color: var(--p-ink-2); }
+.r-tablewrap { overflow-x: auto; }
+.r-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.r-table th { text-align: left; font-size: 11px; font-weight: 700; color: var(--p-muted); padding: 6px 8px; border-bottom: 1.5px solid var(--p-ink); vertical-align: bottom; }
+.r-table td { padding: 7px 8px; border-bottom: 1px solid var(--p-line); white-space: nowrap; vertical-align: top; }
+.r-table td:first-child { white-space: normal; }
+.r-table .wide { width: 34%; min-width: 140px; }
+.r-unit { display: block; font-size: 11px; color: var(--p-muted); font-weight: 400; white-space: normal; }
+.r-cap { margin: 0; font-size: 12px; color: var(--p-muted); line-height: 1.45; }
+.r-empty { margin: 0; font-size: 13px; color: var(--p-muted); }
+.r-chart { width: 100%; height: auto; display: block; }
+.r-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--p-ink-2); }
+.r-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.r-key { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--p-ink-2); }
+.r-key span { display: inline-flex; align-items: center; gap: 5px; }
+.r-key i { width: 10px; height: 10px; border-radius: 2px; }
+.r-splitbar { display: flex; height: 10px; border-radius: 3px; overflow: hidden; gap: 2px; background: #fff; }
+.r-splitbar.empty { background: var(--p-line); }
+.r-splitbar i { display: block; height: 100%; }
+.r-strip { display: grid; gap: 2px; align-items: center; font-size: 11px; }
+.r-strip .r-place { font-size: 12px; font-weight: 600; padding-right: 6px; }
+.r-strip-y { text-align: center; color: var(--p-muted); font-size: 10px; }
+.r-strip-c { height: 22px; border-radius: 2px; display: grid; place-items: center; font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.r-strip-c.focus { box-shadow: 0 0 0 2px var(--p-ink); }
+.r-maps { display: flex; flex-direction: column; gap: 12px; }
+.r-map { margin: 0; }
+.r-map svg { width: 100%; height: auto; max-height: 380px; display: block; }
+.r-map figcaption { font-size: 12px; font-weight: 700; color: var(--p-ink-2); margin-top: 4px; }
+.r-notes p { margin: 0 0 8px; font-size: 14px; line-height: 1.6; color: var(--p-ink); max-width: 68ch; white-space: pre-wrap; }
+.rdoc-foot { border-top: 1px solid var(--p-line); padding-top: 14px; display: flex; flex-direction: column; gap: 6px; }
+.rdoc-foot p { margin: 0; font-size: 11px; color: var(--p-muted); line-height: 1.5; }
+.rdoc-foot b { color: var(--p-ink-2); }
+.top-in .seg a { white-space: nowrap; }
+
+/* The Settings | Report switch is for phones only. Scoped under .rb so it outranks .seg.wide's display: flex. */
+.rb > .rb-switch { display: none; }
+@media (max-width: 900px) {
+  .rb-page { height: auto; min-height: 100dvh; }
+  .rb { display: block; }
+  .rb > .rb-switch { display: flex; position: sticky; top: 0; z-index: 3; margin: 8px 12px; box-shadow: 0 1px 2px rgba(11, 21, 32, .12); }
+  .rb[data-pane="report"] .rb-side, .rb[data-pane="settings"] .rb-main { display: none; }
+  .rb-actions { position: static; }
+  .rb-side { border-right: 0; border-bottom: 1px solid var(--line); overflow: visible; }
+  .rb-main { overflow: visible; padding: 0 12px 32px; }
+  .rdoc { padding: 28px 20px; gap: 24px; }
+  .rdoc h1 { font-size: 34px; }
+}
+
+@media print {
+  @page { size: letter; margin: 14mm 12mm; }
+  html, body { height: auto; background: #fff; }
+  .top, .rb-side, .rb-actions, .rb-switch, .r-placeholder { display: none !important; }
+  .rb-main { display: block !important; }
+  .rb-page, .rb { display: block; height: auto; }
+  .rb-main { overflow: visible; padding: 0; background: #fff; }
+  .rdoc { max-width: none; margin: 0; padding: 0; box-shadow: none; gap: 22px; }
+  .rsec, .r-map, .r-chart, .r-table tr { break-inside: avoid; }
+  .rsec h2 { break-after: avoid; }
+  .r-tablewrap { overflow: visible; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+
+.p-links { display: inline-flex; gap: 14px; }

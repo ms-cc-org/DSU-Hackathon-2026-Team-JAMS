@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { binOf } from '@/lib/bins';
 import { SEVERITY_SHORT, SEVERITY_WORD } from '@/lib/colors';
@@ -61,7 +62,10 @@ function CountyProfile({ c }: { c: County }) {
         </p>
         <div className="p-ctx">
           <span><b>{formatDay(s.day)}</b> · {s.year} {CROP_NAME[k]} season ({SEASON_LABEL[k]})</span>
-          <button className="linkbtn" onClick={zoomToCounty}>Zoom to county</button>
+          <span className="p-links">
+            <button className="linkbtn" onClick={zoomToCounty}>Zoom to county</button>
+            <Link className="linkbtn" href={`/reports?place=c:${c.f}&crop=${k}&year=${s.year}`}>Build a report</Link>
+          </span>
         </div>
       </div>
       <div className="tiles">

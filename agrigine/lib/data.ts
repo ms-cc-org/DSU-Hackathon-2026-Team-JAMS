@@ -19,10 +19,14 @@ type Usa = Topology<{ states: GeometryCollection<{ name: string }>; nation: Geom
 
 export const DATA_URL = '/data/agrigine.json';
 
-async function loadBundle(): Promise<Bundle> {
-  const res = await fetch(DATA_URL);
-  if (!res.ok) throw new Error(`${DATA_URL} returned ${res.status}`);
-  return res.json();
+let bundlePromise: Promise<Bundle> | null = null;
+/** The data bundle, fetched once per page load and shared by the explorer and the report builder. */
+export function loadBundle(): Promise<Bundle> {
+  bundlePromise ??= fetch(DATA_URL).then(res => {
+    if (!res.ok) throw new Error(`${DATA_URL} returned ${res.status}`);
+    return res.json() as Promise<Bundle>;
+  }).catch(e => { bundlePromise = null; throw e; });
+  return bundlePromise;
 }
 
 async function loadOutlines(): Promise<Outlines> {

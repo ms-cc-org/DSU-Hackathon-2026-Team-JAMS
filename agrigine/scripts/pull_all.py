@@ -12,6 +12,7 @@ data/processed/{nass,acis,drought,soil,irrigation,modis}). This script adds ever
     cities     Census places and 2024 populations           data/processed/cities/cities.csv
     bundle     all of the above                             agrigine/public/data/agrigine.json
     daily      daily weather and NASA POWER                 agrigine/public/data/daily/*.bin
+    api        the bundle, split for the MCP server         agrigine/public/data/api/
 
 Downloads are cached in data/raw/<source>/, so a re-run only fetches what's missing. A step whose output already
 exists is skipped unless you pass --force; the two app files are rebuilt whenever a step before them ran.
@@ -43,6 +44,7 @@ STEPS = [
     ("cities", "cities_pull.py", DATA / "processed/cities/cities.csv", False),
     ("bundle", "build_data.py", BUNDLE, True),
     ("daily", "build_daily.py", APP / "public/data/daily/normals.bin", True),
+    ("api", "build_api.py", APP / "public/data/api/index.json", True),
 ]
 BASE = ["master_dataset.parquet", "counties.geojson", "processed/acis/weather_daily.parquet",
         "processed/drought/drought_weekly.parquet", "processed/soil/soil_county.parquet",

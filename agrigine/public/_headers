@@ -1,0 +1,4 @@
+# Cloudflare Pages response headers. Next.js names its built code files by content hash, so they never change
+# and browsers can keep them for a year. Data files keep their names across rebuilds, so they are left alone.
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable

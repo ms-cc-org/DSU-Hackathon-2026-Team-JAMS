@@ -16,6 +16,19 @@ Open http://localhost:3000. The plan is at http://localhost:3000/plan.
 
 For a production build: `npm run build && npm start`.
 
+## Deploy
+
+The site is a static export hosted free on **Cloudflare Pages** at <https://agrigine.pages.dev>. The MCP server is a **Cloudflare Worker** (free tier) at <https://agrigine-mcp.agrigine-mcp.workers.dev/mcp>; it reads the site's `/data/api/` files.
+
+```bash
+npx wrangler login        # once, opens a browser
+npm run deploy            # build to out/ and upload it to Pages
+npm run deploy:mcp        # deploy worker/ (the MCP server)
+npm start                 # serve out/ locally on port 3123, the same files Pages serves
+```
+
+Connect an AI assistant to the MCP server with its URL, `https://agrigine-mcp.agrigine-mcp.workers.dev/mcp` (Streamable HTTP). In Claude Code: `claude mcp add --transport http agrigine https://agrigine-mcp.agrigine-mcp.workers.dev/mcp`.
+
 ## Rebuild the data
 
 All the data is checked in: the hackathon base data, every processed dataset in `data/processed/` and the app's files in `public/data/`. A fresh clone has everything; only the raw download caches (`data/raw/`, about 500 MB) are left out. To refresh the data or pull it all again from the sources, run one script (Python 3.11+):
@@ -38,6 +51,7 @@ The script caches downloads in `data/raw/<source>/` and writes to `data/processe
 | cities | `cities_pull.py` | Census Gazetteer and 2024 population estimates | `data/processed/cities/` |
 | bundle | `build_data.py` | All of the above | `public/data/agrigine.json` |
 | daily | `build_daily.py` | Daily weather and NASA POWER | `public/data/daily/` |
+| api | `build_api.py` | The bundle, split into small files for the MCP server | `public/data/api/` |
 
 Each script also runs on its own from the `agrigine` folder, for example `python3 scripts/rma_pull.py`.
 

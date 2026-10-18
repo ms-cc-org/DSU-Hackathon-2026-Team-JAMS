@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The MCP Worker has its own package and type-check (worker/package.json).
+    "worker/**",
   ]),
 ]);
 
