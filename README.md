@@ -19,6 +19,34 @@ Built for the DSU *Data to Harvest* hackathon, October 17–18, 2026.
 
 The app itself is TypeScript (Next.js); the data pipeline and every model are Python (`agrigine/scripts/`, `notebooks/`), and the notebooks run on their own as Jupyter notebooks.
 
+### Directions covered
+
+Every direction in the hackathon brief, what the app does for it, and its held-out check. The checks are computed by `notebooks/directions_check.py`, which writes [notebooks/directions_check.md](notebooks/directions_check.md); the model checks are in [BENCHMARKS.md](BENCHMARKS.md).
+
+| Direction | In the app | Check on unseen years |
+|---|---|---|
+| **Crop Loss Early Warning** | Set the date to August 1, color the map by *Expected season yield*; the county profile gives the reasons | D2+ list on the last map before Aug 1 catches 49% of corn and 38% of soybean losses over 2000–2025 (precision 40% / 37%). The model's list, same length, beats it on 2016–2025: 36% vs 33% corn, 43% vs 40% soybeans |
+| **Drought Assistance Targeting** | County profile and the *Drought report card* template; the 4- and 8-week severe-drought chance as the trigger | A 2000–2015 drought ranking predicts 2016–2025 drought weeks (Spearman ρ 0.63, 224 counties) but not which counties lose most (ρ −0.16), so the trigger is current conditions: the drought-chance model scores AUC 0.93 on onsets |
+| **Heat-Stress Advisory** | *Days ≥ 35 °C*, *Hot nights*, *Flowering heat* layers; the in-season yield model warns on heat and drought together | Rule chosen on 2000–2018, checked on 2019–2025: heat days ≥ 7 hits 62% of losses with 17% false alarms; heat + ≥ 2 weeks D2+ hits 78% with 33%; the two tie net, so heat alone is not enough |
+| **Soil and Crop Resilience** | *Soil water storage* and *Drought-prone soil* layers; Soil and land report block | Drought seasons, IA + NE corn: high-storage counties lost 2.8 points *more* than low-storage (90% range −4.1 to −1.5, 1,640 county-seasons). An honest "no protective effect at county level", confounded by irrigation and 2012 |
+| **Grain Supply Outlook** | *Production* layer; 1–3 year yield forecasts with 80% ranges; state totals in reports | Iowa corn, 43 counties reporting every year: trend-only estimate with a range from past trend errors held the real value in 7 of 10 years, 2016–2025. The county forecasts test corn trend at +41% over the place average |
+| **Frost-Safe Planting Calendar** | *Frost risk* layer by date; safe planting date in the profile and the date dial | Dates built on 2000–2018 saw a later frost in 9.7% of 2019–2025 springs (goal ≤ 10%), 251 counties |
+| **Drought Category Reality Check** | *Worst drought level* and *Weeks in severe drought* layers, by state and crop in reports | Level × state × crop table from 2000–2012 predicts 2013–2025 within 2.5 points on average; Nebraska's cells all within 4.3, Iowa's D3/D4 cells miss by 8–17 because 2012 dominates. Recommendation in `directions_check.md` §7 |
+| **AgriAdvisor** | The MCP server (`agrigine/worker/`): five functions an AI assistant calls, each returning the rows behind the answer | Hand-checked questions below |
+
+Hand-checked questions for AgriAdvisor (answers from `data/master_dataset.parquet`):
+
+| Question | Function | Answer |
+|---|---|---|
+| What was Polk County, Iowa's corn yield in 2012? | `get_county_season` | 149.1 bu/ac, 15.5% below normal; worst drought level D3, 11 weeks in D2+ |
+| Which was Story County, Iowa's worst corn year? | `get_county_history` | 2013: 137.2 bu/ac, 24.2% below normal |
+| Which Iowa counties had the most weeks of severe drought in 2012? | `rank_counties` | Lee, Davis and Appanoose, 13 weeks each |
+| Which Nebraska county had the best soybean yields in 2016–2025? | `rank_counties` | Phelps County, 68.8 bu/ac on average |
+| How many years of corn yields does Kent County, Delaware have? | `get_county_history` | All 26, averaging 154.6 bu/ac |
+| Will it rain in Polk County next week? | — | The data can't answer that: it ends December 31, 2025, and the 2026–2028 values are typical-season predictions, not a forecast |
+| What was the tomato yield in Fresno County? | — | The data can't answer that: it covers corn, soybeans, winter wheat and sorghum only |
+| Which field on my farm should I plant first? | — | The data can't answer that: it is county-level; a farmer's own records in Predict are the closest it gets |
+
 <details>
 <summary><b>Codebase structure</b> (click to expand)</summary>
 
@@ -37,6 +65,7 @@ DSU-Hackathon/
 │   │   └── master_build_log.json     # checks run when the master was built
 │   └── raw/                          # download caches (gitignored, about 500 MB)
 ├── notebooks/                        # predictive modeling; see "Predictive modeling"
+│   ├── directions_check.py           # held-out checks for every hackathon direction → directions_check.md
 │   ├── Agrigine_Forecasts.ipynb      # 2026–2028 season forecasts: 4 candidate models, tested on 2016–2025
 │   ├── Agrigine_Daily_Predictions.ipynb  # day by day: season yield, drought chance, frost risk, typical weather
 │   ├── Agrigine_2026_2028.ipynb      # every layer for every day of 2026–2028, pre-run into app files

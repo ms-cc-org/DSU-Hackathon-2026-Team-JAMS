@@ -200,6 +200,10 @@ Sample farm (Story County, IA, 3 fields, 2008–2025, 18 seasons per crop), LOO 
 
 ---
 
+## Hackathon direction checks
+
+The checks each direction in the brief asks for (D2+ watch-list hit rate 2000–2025, drought ranking 2000–2015 → 2016–2025, heat rule 2000–2018 → 2019–2025, soil-effect bootstrap, production range coverage, drought-category table 2000–2012 → 2013–2025) are computed by `notebooks/directions_check.py` and written to `notebooks/directions_check.md`, summarized in the README under *Directions covered*.
+
 ## Not benchmarked, by design
 
 - **Storms and insurance for 2026–2028**: county means (storms: 2000–2025 per crop season; insurance: 2016–2025 by cause and month, causes < $1 dropped). No skill claimed.
