@@ -1,11 +1,18 @@
 'use client';
-import type { ReactNode } from 'react';
+import Link from 'next/link';
+import { useEffect, useState, type ReactNode } from 'react';
+import { farmRecordsIn, type FarmRecord } from '@/lib/account';
+import { CROP_KEY, CROP_LABEL } from '@/lib/farmcsv';
+import { modelName } from '@/lib/farms';
+import { useAuth } from '@/lib/supabase';
 import { RAMP, SEVERITY, SEVERITY_SHORT, USDM } from '@/lib/colors';
 import { CROPS, CROP_NAME, CROP_TITLE, SEASON_LABEL, SEVERE_WEEKS, STATES } from '@/lib/constants';
 import { dayOfYear, median, num, pct, plural, present, signed, thousands } from '@/lib/format';
 import { METRICS } from '@/lib/metrics';
-import { STORM_TYPES, eventDate, magnitude, money, seasonEvents, stormSeason } from '@/lib/storms';
-import { dayValue, droughtOn, formatDay, normalValue, seasonProgress, seasonToDate } from '@/lib/daily';
+import { STORM_TYPES, eventDate, magnitude, money, seasonDays, seasonEvents, stormSeason } from '@/lib/storms';
+import { LAST_OBSERVED_YEAR, dayValue, droughtOn, formatDay, isPredictedDay, isPredictedYear, normalValue, seasonProgress, seasonToDate, seasonYearOf } from '@/lib/daily';
+import { savedModelValue } from '@/lib/farmmodel';
+import { calendarValue, expectedYield, frostRisk, predicted } from '@/lib/predict';
 import { LOSS_COLOR, LOSS_LABEL, insuranceSeason, mainCause } from '@/lib/insurance';
 import type { County, CropKey, CropSeries } from '@/lib/types';
 import { CropSpark, DailyYear, DroughtSeasonKey, MonthlyHigh, MonthlyRain, PeerStrip, WeeklyDrought, YearBars, severeColor } from '../charts';
@@ -33,6 +40,17 @@ function Summary({ c, k }: { c: County; k: CropKey }) {
   if (sv != null) bits.push(sv ? <>drought reached <b>{SEVERITY[sv]}</b>{wk ? ` with ${plural(wk, 'week')} in D2 or worse` : ''}</> : 'there was no drought');
   if (pa != null) bits.push(`rain was ${Math.abs(pa)}% ${pa < 0 ? 'below' : 'above'} normal`);
   if (ht != null) bits.push(`${plural(ht, 'day')} reached 35 °C`);
+  if (st === 'p' || (isPredictedYear(s.year) && st !== 'r')) {
+    return (
+      <p className="lead">
+        <span className="pred-chip" style={{ marginLeft: 0, marginRight: 6 }}>Predicted</span>
+        {y != null ? (
+          <>For {s.year}, {c.n} County is expected to harvest about <b>{num(y, 1)} bushels of {CROP_NAME[k]} per acre</b>{a != null && <>, {Math.abs(a) < 0.5 ? 'on' : <b>{Math.abs(a).toFixed(1)}% {a < 0 ? 'below' : 'above'}</b>} its trend</>}.</>
+        ) : <>There&apos;s no {CROP_NAME[k]} yield prediction for {c.n} County in {s.year}.</>}
+        {' '}A typical {SEASON_LABEL[k]} season here brings {sv ? <>drought up to <b>{SEVERITY[sv]}</b></> : 'no drought'}{ht != null ? ` and ${plural(Math.round(ht), 'day')} at 35 °C` : ''}. Predicted from the records through 2025; the weather years ahead can&apos;t be known, so these are the county&apos;s typical season.
+      </p>
+    );
+  }
   return (
     <p className="lead">
       {st === 'r' && y != null ? (
@@ -51,17 +69,36 @@ function Summary({ c, k }: { c: County; k: CropKey }) {
 
 /** The county on the selected date: the day's weather, the drought map in effect, recent storms, and the season so far. */
 function ThisDay({ c, k }: { c: County; k: CropKey }) {
-  const { s, t } = useExplorer();
+  const { s, t, bundle, myFarms } = useExplorer();
   const hi = dayValue(t, 'tmax', c), lo = dayValue(t, 'tmin', c), hiNormal = normalValue(t, 'tmax', c);
   const rain = dayValue(t, 'pcpn', c), r7 = dayValue(t, 'rain7', c), r30 = dayValue(t, 'rain30', c), r30Normal = normalValue(t, 'rain30', c);
   const dry = dayValue(t, 'dry', c), drought = droughtOn(c, s.day), storms = METRICS.dStorms7.get(c, k, 0, t);
   const gdd = seasonToDate(t, c, k, 'gdd'), hot = seasonToDate(t, c, k, 'hot');
   const vpd = dayValue(t, 'vpd', c), et0 = dayValue(t, 'et0', c), soil = dayValue(t, 'soil', c), soilNormal = normalValue(t, 'soil', c);
   const wb = dayValue(t, 'wb30', c), wbNormal = normalValue(t, 'wb30', c);
+  const future = isPredictedDay(s.day);
+  const ey = expectedYield(t, k, c, seasonDays), p4 = predicted(t, 'drought_4w', c), p8 = predicted(t, 'drought_8w', c);
+  const frost = frostRisk(t, c), hiLo = calendarValue(t, 'tmax_p10', c), hiHi = calendarValue(t, 'tmax_p90', c);
+  const scores = t.p?.index?.scores, skill = scores?.crops_end_of_season_skill[k];
+  // The farmer's saved models switched on in My farms, for farms in this county
+  const farmRows = (myFarms?.farms.filter(f => f.fips === c.f) ?? []).flatMap(f => (myFarms?.models ?? [])
+    .filter(m => m.farm_id === f.id && s.shownModels.includes(m.id)).flatMap(m => {
+      const mk = CROP_KEY[m.crop], season = seasonYearOf(s.day, mk), v = savedModelValue(m, c, mk, bundle.years, season);
+      return v ? [{ id: m.id, term: `${f.name}: expected ${CROP_LABEL[m.crop].toLowerCase()} yield`,
+        value: `${num(v.value, 1)} bu/ac${v.low != null ? ` (${num(Math.max(0, v.low))}–${num(v.high!)})` : ''}`,
+        sub: `${season} season, ${v.predicted ? 'predicted' : 'estimated'} by your ${modelName(m.kind).toLowerCase()} model` }] : [];
+    }));
+  const reported = ey && c.d[k] && ey.season <= LAST_OBSERVED_YEAR && c.d[k]!.st[ey.season - 2000] === 'r' ? c.d[k]!.y[ey.season - 2000] : null;
+  const yieldNote = !ey ? undefined
+    : ey.season > LAST_OBSERVED_YEAR ? `The ${ey.season} season, predicted from data through 2025 (${ey.phase === 'before' ? 'before planting' : ey.phase === 'after' ? 'after harvest' : 'in season'}).`
+    : ey.phase === 'before' ? `The ${ey.season} season hasn't started, so the expectation is the county's trend.`
+    : `The ${ey.season} season as predicted ${ey.phase === 'after' ? 'at harvest' : 'on this date'} from conditions so far${reported != null ? `; NASS later reported ${num(reported, 1)} bu/ac` : ''}.`
+      + (skill == null ? '' : skill > 0 ? ` In testing it beat the trend alone by ${Math.round(skill * 100)}% at harvest.` : ' In testing it didn\'t yet beat the trend alone; treat it as experimental.');
   return (
     <div className="blk">
-      <h4>{formatDay(s.day, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</h4>
+      <h4>{formatDay(s.day, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}{future && <span className="pred-chip">Predicted</span>}</h4>
       <p className="cap">{CROP_TITLE[k]}: {seasonProgress(s.day, k).label.toLowerCase()}</p>
+      {future && <p className="cap">Every value for this date is predicted from data through Dec 31, 2025: the normal for the date, starting from the Dec 31 conditions where those last (soil moisture, water balance, drought).</p>}
       {!t.data ? <p className="hint">Loading daily weather…</p> : (
         <dl className="facts">
           <Fact term="High and low" value={hi == null ? '—' : `${num(hi, 1)} / ${lo == null ? '—' : num(lo, 1)} °C`}
@@ -77,8 +114,21 @@ function ThisDay({ c, k }: { c: County; k: CropKey }) {
           <Fact term="Crop water demand" value={et0 == null ? '—' : `${num(et0, 1)} mm/day`} sub="Reference evapotranspiration (FAO-56)" />
           <Fact term="Air dryness (VPD)" value={vpd == null ? '—' : `${num(vpd, 2)} kPa`} sub={vpd == null ? undefined : vpd >= 2 ? 'High: crops lose water fast' : vpd >= 1.2 ? 'Moderate' : 'Low'} />
           <Fact term="Drought this week" value={drought ? SEVERITY[drought.cat] : '—'} sub={drought ? `Drought Monitor map in effect, DSCI ${drought.dsci}` : undefined} />
-          <Fact term="Storms, last 7 days" value={storms == null ? '—' : num(storms)} sub="Hail, wind, tornado and flood reports" />
+          <Fact term="Storms, last 7 days" value={storms == null ? '—' : num(storms, future ? 1 : 0)} sub={future ? 'Average for these dates, 2000–2025' : 'Hail, wind, tornado and flood reports'} />
           {k !== 'W' && <Fact term="Season so far" value={gdd == null ? 'Not started' : `${num(gdd)} GDD`} sub={hot == null ? undefined : `${plural(hot, 'day')} at 35 °C or hotter`} />}
+        </dl>
+      )}
+      <h4 className="sub-h">Predictions for this date</h4>
+      {!t.p?.index ? <p className="hint">Loading predictions…</p> : (
+        <dl className="facts">
+          <Fact term={`This season's expected ${CROP_NAME[k]} yield`}
+            value={!ey ? '—' : ey.bu != null ? `${num(ey.bu, 1)} bu/ac (${pct(ey.pct, 1)} vs trend)` : `${pct(ey.pct, 1)} vs trend`} sub={yieldNote ?? (c.d[k] ? undefined : `${c.n} County has no ${CROP_NAME[k]} record`)} />
+          <Fact term="Chance of severe drought" value={p4 == null ? '—' : `${num(p4)}% within 4 weeks · ${p8 == null ? '—' : num(p8)}% within 8`}
+            sub={`D2 or worse on the Drought Monitor.${scores ? ` Tested ${scores.tested_on[0]}–${scores.tested_on[1]}: ${scores.drought[0]['Skill vs usual rate']} better than the county's usual rate.` : ''}`} />
+          <Fact term="Frost risk" value={!frost ? '—' : frost.pct <= 0 ? 'None in 2000–2025' : `${num(frost.pct)}%`}
+            sub={!frost ? undefined : frost.spring ? 'Share of 2000–2025 springs with a freeze after this date' : 'Share of 2000–2025 falls with a freeze by this date'} />
+          <Fact term="Typical high for this date" value={hiLo == null || hiHi == null ? '—' : `${num(hiLo, 1)}–${num(hiHi, 1)} °C`} sub="8 in 10 years, 2000–2025" />
+          {farmRows.map(r => <Fact key={r.id} term={r.term} value={r.value} sub={r.sub} />)}
         </dl>
       )}
     </div>
@@ -89,13 +139,14 @@ function AnomalyHistory({ d, k }: { d: CropSeries; k: CropKey }) {
   const { bundle } = useExplorer();
   return (
     <div className="blk">
-      <h4>Yield vs trend, 2000–2025</h4>
+      <h4>Yield vs trend, 2000–2025, predicted to 2028</h4>
       <YearBars
         label="Yield versus trend by season"
         centered unit="%"
-        values={d.a.map((v, j) => (d.st[j] === 'r' ? v : null))}
+        values={d.a.map((v, j) => (d.st[j] === 'r' || d.st[j] === 'p' ? v : null))}
         color={severeColor(d)}
-        tip={j => (d.st[j] === 'r' && d.a[j] != null
+        tip={j => (d.st[j] === 'p' && d.a[j] != null ? `${bundle.years[j]} (predicted): ${pct(d.a[j]!, 1)} vs trend`
+          : d.st[j] === 'r' && d.a[j] != null
           ? `${bundle.years[j]}: ${pct(d.a[j]!, 1)} vs trend, ${plural(d.wk[j] ?? 0, 'week')} in D2+`
           : `${bundle.years[j]}: ${d.st[j] === 's' ? 'planted, no grain harvested' : 'no reported yield'}`)}
       />
@@ -127,6 +178,83 @@ function Places({ c }: { c: County }) {
   );
 }
 
+/** The signed-in farmer's own records in this county, next to the county's NASS yield. Only they can see them. */
+function MyRecords({ c }: { c: County }) {
+  const { bundle } = useExplorer();
+  const { session } = useAuth();
+  const uid = session?.user.id;
+  const [rows, setRows] = useState<{ key: string; list: FarmRecord[] } | null>(null);
+  useEffect(() => {
+    if (!uid) return;
+    let live = true;
+    farmRecordsIn(uid, c.f).then(list => live && setRows({ key: `${uid}:${c.f}`, list })).catch(() => undefined);
+    return () => { live = false; };
+  }, [uid, c.f]);
+  const list = uid && rows?.key === `${uid}:${c.f}` ? rows.list : [];
+  if (!list.length) return null;
+  return (
+    <div className="blk">
+      <h4>Your records here</h4>
+      <div className="tablewrap">
+        <table className="ctable">
+          <thead><tr><th>Field</th><th>Crop</th><th>Year</th><th>Yours</th><th>County</th><th>Difference</th></tr></thead>
+          <tbody>
+            {list.slice(0, 12).map(r => {
+              const d = c.d[CROP_KEY[r.crop]], i = r.year - bundle.years[0];
+              const cy = d && i >= 0 && i < d.y.length && d.st[i] === 'r' ? d.y[i] : null, you = r.yield_bu_per_acre;
+              return (
+                <tr key={r.id} className="static">
+                  <td>{r.field}</td><td>{CROP_LABEL[r.crop]}</td><td>{r.year}</td>
+                  <td>{you == null ? '—' : num(you, 1)}</td><td>{cy == null ? '—' : num(cy, 1)}</td>
+                  <td>{you == null || cy == null ? '—' : pct(((you - cy) / cy) * 100)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="cap">Yields in bushels per acre. Only you can see these. <Link href="/data">Manage your records</Link></p>
+    </div>
+  );
+}
+
+/** The signed-in farmer's saved models for farms in this county, with their predictions. Only they see it. */
+function MyFarmModels({ c }: { c: County }) {
+  const { s, myFarms } = useExplorer();
+  const farms = myFarms?.farms.filter(f => f.fips === c.f) ?? [];
+  if (!farms.length) return null;
+  return (
+    <div className="blk">
+      <h4>Your farm models</h4>
+      {farms.map(f => {
+        const models = myFarms!.models.filter(m => m.farm_id === f.id);
+        return (
+          <div key={f.id} className="pfarm">
+            <b>{f.name}</b>
+            {models.length ? (
+              <div className="tablewrap">
+                <table className="ctable">
+                  <thead><tr><th>Crop · model</th>{models[0].predictions.map(p => <th key={p.year}>{p.year}</th>)}<th>Tested</th></tr></thead>
+                  <tbody>
+                    {models.map(m => (
+                      <tr key={m.id} className="static">
+                        <td>{CROP_LABEL[m.crop]} · {modelName(m.kind)}</td>
+                        {m.predictions.map(p => <td key={p.year} className={p.year === s.year ? 'pfarm-now' : undefined}>{num(p.value)}<span className="r-unit">{num(Math.max(0, p.low))}–{num(p.high)}</span></td>)}
+                        <td>{m.scores.skill > 0 ? `${Math.round(m.scores.skill * 100)}% better` : 'No better'} than your average</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : <p className="hint">No saved models. <Link href="/predict">Build one on Predict</Link>.</p>}
+          </div>
+        );
+      })}
+      <p className="cap">Predicted yields in bu/ac with their 8-in-10 range, from models of your own records. Only you can see these.</p>
+    </div>
+  );
+}
+
 export function OverviewTab({ c }: { c: County }) {
   const { s } = useExplorer();
   const k = s.crop, d = c.d[k];
@@ -135,6 +263,8 @@ export function OverviewTab({ c }: { c: County }) {
     <>
       <ThisDay c={c} k={k} />
       <div className="blk"><h4>The {s.year} season</h4><Summary c={c} k={k} /></div>
+      <MyRecords c={c} />
+      <MyFarmModels c={c} />
       {d && <AnomalyHistory d={d} k={k} />}
       <Places c={c} />
       <div className="blk">
@@ -221,8 +351,8 @@ export function CropsTab({ c }: { c: County }) {
                 return (
                   <tr key={x} aria-selected={x === s.crop} onClick={() => dispatch({ type: 'crop', crop: x })}>
                     <td>{CROP_TITLE[x]}</td>
-                    <td>{st === 'r' && d.y[i] != null ? num(d.y[i]!, 1) : st === 's' ? 'No grain' : '—'}</td>
-                    <td>{st === 'r' && d.a[i] != null ? pct(d.a[i]!, 1) : '—'}</td>
+                    <td>{(st === 'r' || st === 'p') && d.y[i] != null ? `${num(d.y[i]!, 1)}${st === 'p' ? ' (predicted)' : ''}` : st === 's' ? 'No grain' : '—'}</td>
+                    <td>{(st === 'r' || st === 'p') && d.a[i] != null ? pct(d.a[i]!, 1) : '—'}</td>
                     <td>{orDash(d.ap[i], thousands)}</td>
                     <td>{orDash(d.ah[i], thousands)}</td>
                     <td>{prod == null ? '—' : `${METRICS.prod.short(prod)}M bu`}</td>
@@ -362,6 +492,7 @@ export function DroughtTab({ c }: { c: County }) {
     let seasons = 0, severe = 0, worst: { a: number; y: number } | null = null;
     const inDrought: number[] = [], other: number[] = [];
     d.wk.forEach((w, j) => {
+      if (bundle.years[j] > LAST_OBSERVED_YEAR) return;   // evidence from recorded seasons only
       if (w != null) seasons++;
       const isSevere = w != null && w >= SEVERE_WEEKS;
       if (isSevere) severe++;
@@ -429,17 +560,19 @@ export function StormsTab({ c }: { c: County }) {
   const k = s.crop;
   const season = stormSeason(c, k, s.year);
   const events = seasonEvents(c, k, s.year);
+  const future = isPredictedYear(s.year), n = (v: number) => num(v, future ? 1 : 0);
   const yearly = bundle.years.map(y => stormSeason(c, k, y).damaging);
   const day = (e: (typeof events)[number]) => eventDate(e).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
   return (
     <>
       <div className="blk">
-        <h4>{s.year} {CROP_NAME[k]} season, {SEASON_LABEL[k]}</h4>
+        <h4>{s.year} {CROP_NAME[k]} season, {SEASON_LABEL[k]}{future && <span className="pred-chip">Predicted</span>}</h4>
+        {future && <p className="cap">Storms can&apos;t be predicted a season ahead, so these are the county&apos;s averages for a season, 2000–2025.</p>}
         <dl className="facts">
-          <Fact term="Hail" value={num(season.byType[0])} />
-          <Fact term="Damaging wind" value={num(season.byType[1])} sub="Thunderstorm and high-wind reports, including derechos" />
-          <Fact term="Tornadoes" value={num(season.byType[2])} />
-          <Fact term="Floods" value={num(season.byType[3])} sub="Flood and flash-flood reports" />
+          <Fact term="Hail" value={n(season.byType[0])} />
+          <Fact term="Damaging wind" value={n(season.byType[1])} sub="Thunderstorm and high-wind reports, including derechos" />
+          <Fact term="Tornadoes" value={n(season.byType[2])} />
+          <Fact term="Floods" value={n(season.byType[3])} sub="Flood and flash-flood reports" />
           <Fact term="Reported crop damage" value={season.cropDamage ? money(season.cropDamage) : 'None reported'} />
         </dl>
       </div>

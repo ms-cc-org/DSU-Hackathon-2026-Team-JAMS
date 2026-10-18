@@ -3,17 +3,24 @@
 // Each year's weather is a small binary file (scripts/build_daily.py) fetched when the dial reaches that year.
 import { useEffect, useState } from 'react';
 import { seasonDays } from './storms';
+import type { PredictData } from './predict';
 import type { County, CropKey } from './types';
 
 export const DAY_MS = 864e5;
 const EPOCH = Date.UTC(2000, 0, 1);
 export const FIRST_YEAR = 2000;
-export const LAST_YEAR = 2025;
+/** The dial runs to 2028: 2000–2025 are records, 2026–2028 are pre-run predictions (notebooks/Agrigine_2026_2028.ipynb). */
+export const LAST_YEAR = 2028;
+export const LAST_OBSERVED_YEAR = 2025;
 
 export const dayOf = (y: number, m: number, d: number) => Math.round((Date.UTC(y, m - 1, d) - EPOCH) / DAY_MS);
 export const dateOf = (day: number) => new Date(EPOCH + day * DAY_MS);
 export const FIRST_DAY = dayOf(FIRST_YEAR, 1, 1);
 export const LAST_DAY = dayOf(LAST_YEAR, 12, 31);
+export const LAST_OBSERVED_DAY = dayOf(LAST_OBSERVED_YEAR, 12, 31);
+/** True for dates after the records end, whose values are predictions. */
+export const isPredictedDay = (day: number) => day > LAST_OBSERVED_DAY;
+export const isPredictedYear = (year: number) => year > LAST_OBSERVED_YEAR;
 export const yearOf = (day: number) => dateOf(day).getUTCFullYear();
 export const isLeap = (y: number) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
 export const daysIn = (y: number) => (isLeap(y) ? 366 : 365);
@@ -33,6 +40,36 @@ export const parseIsoDay = (s: string | null) => {
   const m = s?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   return m ? clampDay(dayOf(+m[1], +m[2], +m[3])) : null;
 };
+
+const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const monthOf = (w: string) => { const j = MONTH_NAMES.indexOf(w.slice(0, 3).toLowerCase()); return j < 0 ? null : j + 1; };
+
+/**
+ * A date someone typed, as days since 2000-01-01, or null if it isn't a date. Not clamped: the caller decides what
+ * to do with dates outside the records. Understands 7/15/2012, 2012-07-15, July 15 2012, 15 July 2012, Jul 2012,
+ * a bare year (keeps the current month and day) and "today".
+ */
+export function parseTypedDate(text: string, current: number): number | null {
+  const s = text.trim().toLowerCase().replace(/(\d)(st|nd|rd|th)\b/g, '$1').replace(/,/g, ' ').replace(/\s+/g, ' ');
+  if (!s) return null;
+  const real = (y: number, m: number, d: number) => {
+    const t = new Date(Date.UTC(y, m - 1, d));
+    return y >= 1000 && t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d ? dayOf(y, m, d) : null;
+  };
+  const year = (v: string) => (v.length === 2 ? 2000 + Number(v) : Number(v));
+  if (s === 'today' || s === 'now') { const t = new Date(); return real(t.getFullYear(), t.getMonth() + 1, t.getDate()); }
+  let m: RegExpMatchArray | null;
+  if ((m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/))) return real(+m[1], +m[2], +m[3]);
+  if ((m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})$/))) return real(year(m[3]), +m[1], +m[2]);
+  if ((m = s.match(/^([a-z]+)\.? (\d{1,2}) (\d{4})$/)) && monthOf(m[1])) return real(+m[3], monthOf(m[1])!, +m[2]);
+  if ((m = s.match(/^(\d{1,2}) ([a-z]+)\.? (\d{4})$/)) && monthOf(m[2])) return real(+m[3], monthOf(m[2])!, +m[1]);
+  if ((m = s.match(/^([a-z]+)\.? (\d{4})$/)) && monthOf(m[1])) return real(+m[2], monthOf(m[1])!, 1);
+  if ((m = s.match(/^(\d{4})$/))) {
+    const c = dateOf(current);
+    return real(+m[1], c.getUTCMonth() + 1, Math.min(c.getUTCDate(), 28)) ?? null;
+  }
+  return null;
+}
 
 /** The harvest year whose growing season a date belongs to. Winter wheat planted in the fall counts toward next year. */
 export function seasonYearOf(day: number, k: CropKey) {
@@ -120,10 +157,12 @@ export interface DayContext {
   order: Map<string, number>;
   data: Int16Array | null;
   normals: Int16Array | null;
+  /** Day-by-day predictions for the year (lib/predict.ts), when loaded. */
+  p?: PredictData;
 }
 
-export function dayContext(day: number, order: Map<string, number>, data: Int16Array | null, normalsData: Int16Array | null): DayContext {
-  return { day, index: dayIndex(day), slot: calendarSlot(day), days: daysIn(yearOf(day)), counties: order.size, order, data, normals: normalsData };
+export function dayContext(day: number, order: Map<string, number>, data: Int16Array | null, normalsData: Int16Array | null, p?: PredictData): DayContext {
+  return { day, index: dayIndex(day), slot: calendarSlot(day), days: daysIn(yearOf(day)), counties: order.size, order, data, normals: normalsData, p };
 }
 
 /** A county's value for one channel on the context's day, or another day of the same year. */

@@ -5,11 +5,11 @@ export type StateCode = 'CA' | 'DE' | 'IA' | 'NE';
 export type Num = number | null;
 export type LngLat = [number, number];
 
-/** One crop's 26 seasons (2000-2025) from the master table. `st` holds one status letter per season. */
+/** One crop's seasons, 2000-2025 from the master table plus predicted 2026-2028. `st` holds one status letter per season. */
 export interface CropSeries {
   y: Num[]; // yield, bu/ac
   a: Num[]; // yield vs trend, %
-  st: string; // r = reported, n = not reported, s = suppressed (planted, no grain harvested)
+  st: string; // r = reported, n = not reported, s = suppressed (planted, no grain harvested), p = predicted
   ap: Num[]; // acres planted
   ah: Num[]; // acres harvested
   pr: Num[]; // season rainfall, mm
@@ -77,6 +77,8 @@ export interface County {
   ins?: [number, number, number, number][];
   /** Crop insurance payouts by month of loss: [crop, loss-year index, month, USD] */
   insm?: [number, number, number, number][];
+  /** Predicted seasons only: the county's average storm season per crop, [hail, wind, tornado, flood, other, crop damage USD] */
+  stm?: Partial<Record<CropKey, number[]>>;
 }
 
 /** [name, state, county FIPS, longitude, latitude, population] */

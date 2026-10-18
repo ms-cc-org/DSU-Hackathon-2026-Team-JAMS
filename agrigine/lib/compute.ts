@@ -1,5 +1,5 @@
 import { binOf, type Bin } from './bins';
-import { height, metric, type HeightId, type MetricId } from './metrics';
+import { metric, type MetricId } from './metrics';
 import type { ConditionId } from './state';
 import { stormSeason } from './storms';
 import type { DayContext } from './daily';
@@ -35,7 +35,7 @@ export interface MapStyle {
 
 export interface StyleInput {
   metric: MetricId;
-  height: HeightId;
+  raised: boolean;
   crop: CropKey;
   yearIndex: number;
   states: StateCode[];
@@ -44,11 +44,14 @@ export interface StyleInput {
   hidden: BinKey[];
   /** The selected date, for day-by-day layers. */
   t?: DayContext;
+  /** Counties with one of the signed-in farmer's farms, for the "my farms" filter. */
+  farmFips?: Set<string>;
 }
 
 /** Whether a county passes every "show only" filter for this crop and season. */
-function meets(c: County, k: CropKey, i: number, conditions: ConditionId[]) {
+function meets(c: County, k: CropKey, i: number, conditions: ConditionId[], farmFips?: Set<string>) {
   for (const id of conditions) {
+    if (id === 'myFarms' && !farmFips?.has(c.f)) return false;
     if (id === 'drought' && !((c.d[k]?.wk[i] ?? 0) >= 4)) return false;
     if (id === 'storms' && stormSeason(c, k, 2000 + i).damaging < 1) return false;
     if (id === 'longRecord' && [...(c.d[k]?.st ?? '')].filter(x => x === 'r').length < 15) return false;
@@ -63,7 +66,9 @@ export const ringsOf = (counties: County[]): Ring[] => counties.flatMap(c => c.p
  * are "out"; counties in a key band the user switched off are "hidden". Both draw as a gray ghost.
  */
 export function computeStyle(counties: County[], rings: Ring[], s: StyleInput): MapStyle {
-  const m = metric(s.metric), h = height(s.height);
+  const m = metric(s.metric);
+  // Heights follow the key: the first band is flat and the last is tallest. Causes of loss have no order, so they stay flat.
+  const ordered = s.raised && s.metric !== 'insCause';
   const k = s.crop, i = s.yearIndex;
   const bins = m.bins(k), counts = bins.map(() => 0);
   const hidden = new Set<BinKey>(s.hidden), states = new Set(s.states);
@@ -72,8 +77,8 @@ export function computeStyle(counties: County[], rings: Ring[], s: StyleInput): 
 
   for (const c of counties) {
     let status: CountyStatus, value: number | null = null, bin = -1, hv = 0;
-    const yieldOk = !s.reportedOnly || c.d[k]?.st[i] === 'r';
-    if (!states.has(c.s) || !yieldOk || !meets(c, k, i, s.conditions)) status = 'out';
+    const yieldOk = !s.reportedOnly || c.d[k]?.st[i] === 'r' || c.d[k]?.st[i] === 'p';
+    if (!states.has(c.s) || !yieldOk || !meets(c, k, i, s.conditions, s.farmFips)) status = 'out';
     else {
       total++;
       value = m.get(c, k, i, s.t);
@@ -85,10 +90,7 @@ export function computeStyle(counties: County[], rings: Ring[], s: StyleInput): 
         counts[bin]++;
         status = hidden.has(bin) ? 'hidden' : 'on';
       }
-      if (status === 'on' && h.get && h.max) {
-        const x = h.get(c, k, i, s.t);
-        hv = x == null ? 0 : Math.max(0, Math.min(1, x / h.max(k)));
-      }
+      if (status === 'on' && ordered && bins.length > 1) hv = 0.04 + (0.96 * bin) / (bins.length - 1);
       if (status !== 'hidden') shown++;
     }
     byFips.set(c.f, { status, value, bin, color: bin >= 0 ? bins[bin].color : null, height: hv });

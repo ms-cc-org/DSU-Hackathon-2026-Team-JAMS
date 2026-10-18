@@ -1,9 +1,11 @@
 'use client';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { use, useMemo, useRef, useState } from 'react';
+import { use, useEffect, useMemo, useRef, useState } from 'react';
+import { deleteReport, endShare, listMyReports, listShares, saveReport, shareReport, sharedWithMe, type AccountReport, type Share, type SharedReport } from '@/lib/account';
 import { CROPS, CROP_TITLE } from '@/lib/constants';
 import { loadBundle } from '@/lib/data';
-import { loadDailyYear } from '@/lib/daily';
+import { LAST_OBSERVED_YEAR, isPredictedYear, loadDailyYear } from '@/lib/daily';
 import { download, slug, toCsv, type Row } from '@/lib/report/csv';
 import { placeOptions, resolvePlaces } from '@/lib/report/places';
 import {
@@ -11,11 +13,15 @@ import {
   type BlockSpec, type BlockType, type ReportScope, type ReportSpec,
 } from '@/lib/report/spec';
 import { browserStore } from '@/lib/report/store';
+import { useAuth } from '@/lib/supabase';
 import type { Bundle, CropKey } from '@/lib/types';
 import { BLOCKS, type ReportCtx } from './blocks';
 
 const ALL_YEARS = Array.from({ length: LAST_YEAR - FIRST_YEAR + 1 }, (_, j) => FIRST_YEAR + j);
+const yearOption = (y: number) => (isPredictedYear(y) ? `${y} · predicted` : String(y));
 const defaultsOf = (t: BlockType) => BLOCKS[t].defaults();
+const SHARE_DAYS = [7, 30, 90];
+const shortDate = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 const stamp = (iso: string) => new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 /** A new or saved report from the address: ?id= opens a saved one; ?place=&crop=&year= starts a season recap. */
@@ -58,6 +64,41 @@ function ReportBuilder({ bundle }: { bundle: Bundle }) {
   const [pane, setPane] = useState<'settings' | 'report'>('report');
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // ---------- The account: reports saved there, reports shared with me, and this report's shares ----------
+  const { session } = useAuth();
+  const uid = session?.user.id ?? null;
+  const [acct, setAcct] = useState<{ uid: string; reports: AccountReport[]; shared: SharedReport[] } | null>(null);
+  const [acctReload, setAcctReload] = useState(0);
+  const [sharedFrom, setSharedFrom] = useState<{ from: string; expiresAt: string } | null>(null);
+  const [shareEmail, setShareEmail] = useState('');
+  const [shareDays, setShareDays] = useState(30);
+  const [shares, setShares] = useState<{ rowId: string; list: Share[] } | null>(null);
+  const [sharesReload, setSharesReload] = useState(0);
+  // A ?id= link to a report kept in the account rather than this browser opens once the account list arrives.
+  const [wantedId, setWantedId] = useState(() => (params.get('id') && !browserStore.list().some(r => r.id === params.get('id')) ? params.get('id') : null));
+  useEffect(() => {
+    if (!uid) return;
+    let live = true;
+    Promise.all([listMyReports(uid), sharedWithMe()])
+      .then(([reports, shared]) => live && setAcct({ uid, reports, shared }))
+      .catch(e => live && setNote(`Couldn’t load your account’s reports: ${(e as Error).message}`));
+    return () => { live = false; };
+  }, [uid, acctReload]);
+  const account = acct && acct.uid === uid ? acct : null;
+  const inAccount = account?.reports.find(r => r.spec.id === spec.id) ?? null;
+  useEffect(() => {
+    if (!inAccount) return;
+    let live = true;
+    listShares(inAccount.rowId).then(list => live && setShares({ rowId: inAccount.rowId, list })).catch(() => undefined);
+    return () => { live = false; };
+  }, [inAccount?.rowId, sharesReload]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shareList = inAccount && shares?.rowId === inAccount.rowId ? shares.list : [];
+  if (wantedId && account) {
+    setWantedId(null);
+    const hit = account.reports.find(r => r.spec.id === wantedId);
+    if (hit) { setSpec(hit.spec); setDirty(false); }
+  }
+
   // Arriving again with a new address (for example "Build a report" from another county) starts that report.
   if (handled !== query) {
     setHandled(query);
@@ -93,15 +134,39 @@ function ReportBuilder({ bundle }: { bundle: Bundle }) {
     setSpec(newReport(templateId, { places: spec.scope.places, crop: spec.scope.crop, from: spec.scope.from, to: spec.scope.to, year: spec.scope.year }, defaultsOf));
     setDirty(false);
     setNote(null);
+    setSharedFrom(null);
   };
   const openSaved = (r: ReportSpec) => {
     if (!confirmDiscard()) return;
     setSpec(r);
     setDirty(false);
     setNote(null);
+    setSharedFrom(null);
     window.history.replaceState(null, '', `/reports?id=${r.id}`);
   };
-  const save = () => {
+  /** A shared report opens as a copy: the owner's version stays theirs, and saving keeps your own. */
+  const openShared = (r: SharedReport) => {
+    if (!confirmDiscard()) return;
+    setSpec({ ...r.spec, id: newId(), owner: null, sharedWith: [] });
+    setDirty(true);
+    setNote(null);
+    setSharedFrom({ from: r.from, expiresAt: r.expiresAt });
+  };
+  const save = async () => {
+    if (uid) {
+      try {
+        const saved = await saveReport(spec, uid);
+        setSpec(saved);
+        setDirty(false);
+        setSharedFrom(null);
+        setNote('Saved to your account.');
+        setAcctReload(n => n + 1);
+        window.history.replaceState(null, '', `/reports?id=${spec.id}`);
+      } catch (e) {
+        setNote(`Couldn’t save to your account: ${(e as Error).message}`);
+      }
+      return;
+    }
     try {
       browserStore.save(spec);
       setSaved(browserStore.list());
@@ -116,6 +181,37 @@ function ReportBuilder({ bundle }: { bundle: Bundle }) {
     if (!window.confirm(`Delete "${r.title}" from this browser? Its settings file, if you downloaded one, still works.`)) return;
     browserStore.remove(r.id);
     setSaved(browserStore.list());
+  };
+  const moveToAccount = async (r: ReportSpec) => {
+    if (!uid) return;
+    try {
+      await saveReport(r, uid);
+      browserStore.remove(r.id);
+      setSaved(browserStore.list());
+      setAcctReload(n => n + 1);
+    } catch (e) {
+      setNote(`Couldn’t move it: ${(e as Error).message}`);
+    }
+  };
+  const removeFromAccount = async (r: AccountReport) => {
+    if (!window.confirm(`Delete "${r.spec.title}" from your account? Anyone it's shared with loses access too.`)) return;
+    await deleteReport(r.rowId).catch(e => setNote((e as Error).message));
+    setAcctReload(n => n + 1);
+  };
+  const share = async () => {
+    if (!inAccount || !shareEmail.trim()) return;
+    try {
+      const until = await shareReport(inAccount.rowId, shareEmail, shareDays);
+      setNote(`Shared with ${shareEmail.trim()} until ${shortDate(until)}.`);
+      setShareEmail('');
+      setSharesReload(n => n + 1);
+    } catch (e) {
+      setNote((e as Error).message);
+    }
+  };
+  const stopSharing = async (s: Share) => {
+    await endShare(s.id).catch(e => setNote((e as Error).message));
+    setSharesReload(n => n + 1);
   };
 
   const places = useMemo(() => resolvePlaces(spec.scope.places, bundle, byFips), [spec.scope.places, bundle, byFips]);
@@ -174,6 +270,31 @@ function ReportBuilder({ bundle }: { bundle: Bundle }) {
               </button>
             ))}
           </div>
+          {account && account.reports.length > 0 && (
+            <>
+              <h3>In your account</h3>
+              <ul className="rb-saved">
+                {account.reports.map(r => (
+                  <li key={r.rowId} aria-current={r.spec.id === spec.id ? 'true' : undefined}>
+                    <button type="button" className="rb-open" onClick={() => openSaved(r.spec)}><b>{r.spec.title}</b><span>Saved {stamp(r.updatedAt)}</span></button>
+                    <button type="button" className="rb-x" onClick={() => removeFromAccount(r)} aria-label={`Delete ${r.spec.title}`}>×</button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {account && account.shared.length > 0 && (
+            <>
+              <h3>Shared with you</h3>
+              <ul className="rb-saved">
+                {account.shared.map(r => (
+                  <li key={r.rowId}>
+                    <button type="button" className="rb-open" onClick={() => openShared(r)}><b>{r.spec.title}</b><span>From {r.from} · until {shortDate(r.expiresAt)}</span></button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           {saved.length > 0 && (
             <>
               <h3>Saved in this browser</h3>
@@ -181,18 +302,50 @@ function ReportBuilder({ bundle }: { bundle: Bundle }) {
                 {saved.map(r => (
                   <li key={r.id} aria-current={r.id === spec.id ? 'true' : undefined}>
                     <button type="button" className="rb-open" onClick={() => openSaved(r)}><b>{r.title}</b><span>Saved {stamp(r.updatedAt)}</span></button>
+                    {uid && <button type="button" className="rb-x" onClick={() => moveToAccount(r)} aria-label={`Move ${r.title} to your account`} title="Move to your account">↑</button>}
                     <button type="button" className="rb-x" onClick={() => remove(r)} aria-label={`Delete ${r.title}`}>×</button>
                   </li>
                 ))}
               </ul>
             </>
           )}
+          {!uid && <p className="hint"><Link href="/account?next=/reports">Sign in</Link> to keep reports in your account on every device and share them.</p>}
         </section>
 
         <section className="rb-sec">
           <h2>Report</h2>
           <label className="rb-field"><span>Title</span><input value={spec.title} maxLength={120} onChange={e => edit(s => ({ ...s, title: e.target.value }))} /></label>
           <label className="rb-field"><span>Prepared by</span><input value={spec.author} maxLength={80} placeholder="Your name or farm" onChange={e => edit(s => ({ ...s, author: e.target.value }))} /></label>
+        </section>
+
+        <section className="rb-sec">
+          <h2>Share</h2>
+          {!uid ? (
+            <p className="hint"><Link href="/account?next=/reports">Sign in</Link> to share reports with other Agrigine accounts.</p>
+          ) : !inAccount ? (
+            <p className="hint">Save this report to your account, then share it with other accounts here.</p>
+          ) : (
+            <>
+              <div className="rb-share">
+                <label className="rb-field"><span>Their email</span><input type="email" value={shareEmail} placeholder="name@example.com" onChange={e => setShareEmail(e.target.value)} /></label>
+                <label className="rb-field"><span>For</span>
+                  <select value={shareDays} onChange={e => setShareDays(Number(e.target.value))}>{SHARE_DAYS.map(d => <option key={d} value={d}>{d} days</option>)}</select>
+                </label>
+                <button type="button" className="btn" disabled={!shareEmail.trim()} onClick={share}>Share</button>
+              </div>
+              {shareList.length > 0 && (
+                <ul className="rb-saved">
+                  {shareList.map(s => (
+                    <li key={s.id}>
+                      <span className="rb-open static"><b>{s.email}</b><span>{new Date(s.expiresAt) > new Date() ? `Until ${shortDate(s.expiresAt)}` : 'Expired'}</span></span>
+                      <button type="button" className="rb-x" onClick={() => stopSharing(s)} aria-label={`Stop sharing with ${s.email}`}>×</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="hint">They can open and copy the last saved version until the share ends. Your saved settings stay in your account.</p>
+            </>
+          )}
         </section>
 
         <section className="rb-sec">
@@ -221,15 +374,16 @@ function ReportBuilder({ bundle }: { bundle: Bundle }) {
           </div>
           <div className="rb-row">
             <label className="rb-field"><span>From</span>
-              <select value={from} onChange={e => editScope({ from: Number(e.target.value) })}>{ALL_YEARS.filter(y => y <= to).map(y => <option key={y}>{y}</option>)}</select>
+              <select value={from} onChange={e => editScope({ from: Number(e.target.value) })}>{ALL_YEARS.filter(y => y <= to).map(y => <option key={y} value={y}>{yearOption(y)}</option>)}</select>
             </label>
             <label className="rb-field"><span>To</span>
-              <select value={to} onChange={e => editScope({ to: Number(e.target.value) })}>{ALL_YEARS.filter(y => y >= from).map(y => <option key={y}>{y}</option>)}</select>
+              <select value={to} onChange={e => editScope({ to: Number(e.target.value) })}>{ALL_YEARS.filter(y => y >= from).map(y => <option key={y} value={y}>{yearOption(y)}</option>)}</select>
             </label>
             <label className="rb-field"><span>Focus season</span>
-              <select value={year} onChange={e => editScope({ year: Number(e.target.value) })}>{ctx.years.map(y => <option key={y}>{y}</option>)}</select>
+              <select value={year} onChange={e => editScope({ year: Number(e.target.value) })}>{ctx.years.map(y => <option key={y} value={y}>{yearOption(y)}</option>)}</select>
             </label>
           </div>
+          {to > LAST_OBSERVED_YEAR && <p className="hint">{LAST_OBSERVED_YEAR + 1}–{LAST_YEAR} are predicted seasons. Charts hatch them and the CSV marks them.</p>}
         </section>
 
         <section className="rb-sec">
@@ -263,8 +417,11 @@ function ReportBuilder({ bundle }: { bundle: Bundle }) {
 
       <main className="rb-main">
         <div className="rb-actions">
-          <span className="rb-status" role="status">{note ?? (dirty ? 'Unsaved changes' : saved.some(r => r.id === spec.id) ? 'Saved in this browser' : 'Not saved yet')}</span>
-          <button type="button" className="btn primary" onClick={save}>Save</button>
+          <span className="rb-status" role="status">
+            {note ?? (sharedFrom ? `Shared by ${sharedFrom.from} until ${shortDate(sharedFrom.expiresAt)}. Save to keep your own copy.`
+              : dirty ? 'Unsaved changes' : inAccount ? 'Saved to your account' : saved.some(r => r.id === spec.id) ? 'Saved in this browser' : 'Not saved yet')}
+          </span>
+          <button type="button" className="btn primary" onClick={save}>{uid ? 'Save to account' : 'Save'}</button>
           <button type="button" className="btn" onClick={() => window.print()}>Print or save PDF</button>
           <button type="button" className="btn" onClick={exportCsv} disabled={!places.length || !spec.blocks.length}>Download data (CSV)</button>
           <button type="button" className="btn" onClick={exportSettings} title="A small file that rebuilds this exact report">Download settings</button>
@@ -296,7 +453,7 @@ function ReportBuilder({ bundle }: { bundle: Bundle }) {
           <footer className="rdoc-foot">
             {sources.length > 0 && <p><b>Sources.</b> {sources.join('; ')}.</p>}
             {places.some(p => p.isState) && <p><b>State rows</b> combine the state&apos;s counties: totals for dollars and counts, the worst for drought level, and the county median for everything else.</p>}
-            <p>Made with Agrigine from public data for 2000–2025. To rebuild this exact report, open its settings file in Agrigine&apos;s report builder. Report {spec.id}, settings version {spec.schema}.</p>
+            <p>Made with Agrigine from public data for {FIRST_YEAR}–{LAST_OBSERVED_YEAR}.{to > LAST_OBSERVED_YEAR || spec.blocks.some(b => b.options.cover === 'predicted' || b.type === 'farm') ? ` Seasons ${LAST_OBSERVED_YEAR + 1}–${LAST_YEAR} are Agrigine predictions made from data through December 31, ${LAST_OBSERVED_YEAR}, not records.` : ''} To rebuild this exact report, open its settings file in Agrigine&apos;s report builder. Report {spec.id}, settings version {spec.schema}.</p>
           </footer>
         </article>
       </main>

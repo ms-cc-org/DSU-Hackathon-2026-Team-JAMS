@@ -5,7 +5,7 @@ import { binOf } from '@/lib/bins';
 import { SEVERITY_SHORT, SEVERITY_WORD } from '@/lib/colors';
 import { CROPS, CROP_NAME, CROP_TITLE, SEASON_LABEL, SEVERE_WEEKS, STATES, STATE_CODES } from '@/lib/constants';
 import { dayOfYear, median, num, pct, plural, present } from '@/lib/format';
-import { formatDay } from '@/lib/daily';
+import { formatDay, isPredictedDay, isPredictedYear } from '@/lib/daily';
 import { CATEGORIES, metric, season, whyMissing, type MetricId } from '@/lib/metrics';
 import { TAB_IDS, type TabId } from '@/lib/state';
 import type { County, StateCode } from '@/lib/types';
@@ -61,7 +61,7 @@ function CountyProfile({ c }: { c: County }) {
           {Math.abs(c.c[1]).toFixed(2)}° N, {Math.abs(c.c[0]).toFixed(2)}° W · {grown.length ? `Grows ${grown.length > 1 ? grown.slice(0, -1).join(', ') + ' and ' + grown[grown.length - 1] : grown[0]}` : 'No NASS crop records'}
         </p>
         <div className="p-ctx">
-          <span><b>{formatDay(s.day)}</b> · {s.year} {CROP_NAME[k]} season ({SEASON_LABEL[k]})</span>
+          <span><b>{formatDay(s.day)}</b> · {s.year} {CROP_NAME[k]} season ({SEASON_LABEL[k]}){isPredictedDay(s.day) && <span className="pred-chip">Predicted</span>}</span>
           <span className="p-links">
             <button className="linkbtn" onClick={zoomToCounty}>Zoom to county</button>
             <Link className="linkbtn" href={`/reports?place=c:${c.f}&crop=${k}&year=${s.year}`}>Build a report</Link>
@@ -93,12 +93,13 @@ function StateProfile({ code }: { code: StateCode }) {
   const k = s.crop, years = bundle.years;
   const all = bundle.counties.filter(c => c.s === code);
   const grow = all.filter(c => c.d[k]);
-  const reported = grow.filter(c => c.d[k]!.st[i] === 'r');
+  const has = (st: string) => st === 'r' || st === 'p';
+  const reported = grow.filter(c => has(c.d[k]!.st[i]));
   const medAnom = median(present(reported.map(c => c.d[k]!.a[i])));
   const medRain = median(present(grow.map(c => c.d[k]!.pa[i])));
   const severe = grow.filter(c => (c.d[k]!.wk[i] ?? 0) >= SEVERE_WEEKS).length;
   const yearly = years.map((_, j) => {
-    const a = present(grow.filter(c => c.d[k]!.st[j] === 'r').map(c => c.d[k]!.a[j]));
+    const a = present(grow.filter(c => has(c.d[k]!.st[j])).map(c => c.d[k]!.a[j]));
     return { med: a.length >= 3 ? median(a) : null, share: grow.length ? grow.filter(c => (c.d[k]!.wk[j] ?? 0) >= SEVERE_WEEKS).length / grow.length : 0 };
   });
   const m = metric(s.metric);
@@ -110,10 +111,10 @@ function StateProfile({ code }: { code: StateCode }) {
       <div className="p-head">
         <div className="p-top"><p className="eyebrow">State · {all.length} counties in Agrigine</p><CloseButton /></div>
         <h2 className="p-name">{STATES[code]}</h2>
-        <div className="p-ctx"><span>Showing the <b>{s.year} {CROP_NAME[k]}</b> season</span></div>
+        <div className="p-ctx"><span>Showing the <b>{s.year} {CROP_NAME[k]}</b> season{isPredictedYear(s.year) && <span className="pred-chip">Predicted</span>}</span></div>
       </div>
       <div className="tiles">
-        <div className="tile"><span className="tile-l"><i style={{ background: 'var(--cat-crops)' }} />Grow {CROP_NAME[k]}</span><span className="tile-v">{grow.length}</span><span className="tile-s">{reported.length} reported in {s.year}</span></div>
+        <div className="tile"><span className="tile-l"><i style={{ background: 'var(--cat-crops)' }} />Grow {CROP_NAME[k]}</span><span className="tile-v">{grow.length}</span><span className="tile-s">{reported.length} {isPredictedYear(s.year) ? 'predicted' : 'reported'} in {s.year}</span></div>
         <div className="tile"><span className="tile-l"><i style={{ background: 'var(--cat-crops)' }} />Median vs trend</span><span className={`tile-v${medAnom != null && medAnom < -5 ? ' loss' : ''}`}>{medAnom == null ? '—' : pct(medAnom, 1)}</span><span className="tile-s">Reported counties</span></div>
         <div className="tile"><span className="tile-l"><i style={{ background: 'var(--cat-drought)' }} />Severe drought</span><span className="tile-v">{grow.length ? `${Math.round((severe / grow.length) * 100)}%` : '—'}</span><span className="tile-s">Counties with 4+ weeks in D2+</span></div>
         <div className="tile"><span className="tile-l"><i style={{ background: 'var(--cat-weather)' }} />Median rain</span><span className="tile-v">{medRain == null ? '—' : pct(medRain)}</span><span className="tile-s">vs normal</span></div>
@@ -121,7 +122,7 @@ function StateProfile({ code }: { code: StateCode }) {
       <div className="p-body">
         {grow.length > 0 && (
           <div className="blk">
-            <h4>Median yield vs trend, 2000–2025</h4>
+            <h4>Median yield vs trend, 2000–2025, predicted to 2028</h4>
             <YearBars
               label={`${STATES[code]} median yield versus trend by season`} centered unit="%"
               values={yearly.map(y => y.med)}

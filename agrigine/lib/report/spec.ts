@@ -6,7 +6,8 @@ import type { CropKey, StateCode } from '../types';
 
 export const SCHEMA = 1;
 export const FIRST_YEAR = 2000;
-export const LAST_YEAR = 2025;
+/** Seasons after 2025 are Agrigine's predictions (lib/daily.ts LAST_OBSERVED_YEAR); reports can include them. */
+export const LAST_YEAR = 2028;
 export const MAX_PLACES = 6;
 /** One color per place, in fixed order: a validated categorical set (blue, orange, aqua, yellow, magenta, green). */
 export const PLACE_COLORS = ['#2A78D6', '#EB6834', '#1BAF7A', '#EDA100', '#E87BA4', '#008300'];
@@ -14,7 +15,7 @@ export const PLACE_COLORS = ['#2A78D6', '#EB6834', '#1BAF7A', '#EDA100', '#E87BA
 /** 'c:19153' is a county, 's:IA' a state. */
 export type PlaceRef = string;
 
-export const BLOCK_TYPES = ['glance', 'compare', 'trend', 'daily', 'drought', 'insurance', 'storms', 'land', 'map', 'notes'] as const;
+export const BLOCK_TYPES = ['glance', 'compare', 'trend', 'daily', 'drought', 'insurance', 'storms', 'land', 'map', 'farm', 'notes'] as const;
 export type BlockType = (typeof BLOCK_TYPES)[number];
 
 export interface BlockSpec {

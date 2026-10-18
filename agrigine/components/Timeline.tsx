@@ -1,7 +1,8 @@
 'use client';
-import { useEffect, useMemo, useRef, type KeyboardEvent, type PointerEvent } from 'react';
+import { useRouter } from 'next/navigation';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent } from 'react';
 import { CROP_NAME, CROP_TITLE } from '@/lib/constants';
-import { FIRST_DAY, LAST_DAY, clampDay, dateOf, dayOf, formatDay, seasonProgress, seasonYearOf } from '@/lib/daily';
+import { FIRST_DAY, LAST_DAY, LAST_OBSERVED_DAY, clampDay, dateOf, dayOf, formatDay, isPredictedDay, isoDay, parseTypedDate, seasonProgress, seasonYearOf } from '@/lib/daily';
 import { seasonDays } from '@/lib/storms';
 import { useExplorer, useReducedMotion } from './explorer-context';
 import { PauseIcon, PlayIcon } from './icons';
@@ -28,7 +29,7 @@ export default function Timeline() {
   const drag = useRef<{ x: number; time: number } | null>(null);
   const frame = useRef(0);
   const last = useRef(0);
-  const look = useRef({ ink: '#14201A', muted: '#66716A', tick: '#C3CBC4', bar: '#EB6834', band: '#008300', font: 'system-ui' });
+  const look = useRef({ ink: '#14201A', muted: '#66716A', tick: '#C3CBC4', bar: '#EB6834', band: '#008300', pred: '#7B4FD1', font: 'system-ui' });
   const crop = useRef(s.crop);
 
   const share = useMemo(() => {
@@ -59,6 +60,19 @@ export default function Timeline() {
       const x = mid + radius * Math.sin(arc), next = mid + radius * Math.sin(Math.min(Math.PI / 2, arc + PX / radius));
       const width = Math.max(0.6, next - x), fade = Math.cos(arc);
       ctx.globalAlpha = 0.2 + 0.8 * fade;
+      // Predicted dates (after the records end) sit on a tinted band, with a marker where predictions begin
+      if (d > LAST_OBSERVED_DAY) {
+        ctx.fillStyle = c.pred;
+        ctx.globalAlpha *= 0.12;
+        ctx.fillRect(x, 0, width + 0.3, h);
+        ctx.globalAlpha = 0.2 + 0.8 * fade;
+        if (d === LAST_OBSERVED_DAY + 1) {
+          ctx.fillStyle = c.pred;
+          ctx.fillRect(x - 1, 0, 2, h);
+          ctx.font = `800 10px ${c.font}`;
+          ctx.fillText('PREDICTED →', x + 5, 10);
+        }
+      }
       const sy = seasonYearOf(d, crop.current);
       if (sy !== seasonCache.year) { const [from, to] = seasonDays(crop.current, sy); seasonCache = { year: sy, from, to }; }
       if (d >= seasonCache.from && d <= seasonCache.to) {
@@ -120,7 +134,7 @@ export default function Timeline() {
     const read = () => {
       const css = getComputedStyle(document.documentElement);
       const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
-      look.current = { ink: v('--ink', '#14201A'), muted: v('--muted', '#66716A'), tick: v('--line-2', '#C3CBC4'), bar: v('--bar-drought', '#EB6834'), band: v('--cat-crops', '#008300'), font: getComputedStyle(document.body).fontFamily };
+      look.current = { ink: v('--ink', '#14201A'), muted: v('--muted', '#66716A'), tick: v('--line-2', '#C3CBC4'), bar: v('--bar-drought', '#EB6834'), band: v('--cat-crops', '#008300'), pred: v('--cat-storms', '#7B4FD1'), font: getComputedStyle(document.body).fontFamily };
       draw();
     };
     read();
@@ -201,6 +215,22 @@ export default function Timeline() {
     dispatch({ type: 'day', day: clampDay(day) });
   };
 
+  // Typing a date: inside the records it moves the dial; after them it opens Predict, where forecasts will live.
+  const router = useRouter();
+  const [typing, setTyping] = useState<string | null>(null);
+  const [typeError, setTypeError] = useState<string | null>(null);
+  const startTyping = () => { setTyping(formatDay(s.day)); setTypeError(null); };
+  const stopTyping = () => { setTyping(null); setTypeError(null); };
+  const goToTyped = (e: FormEvent) => {
+    e.preventDefault();
+    const day = parseTypedDate(typing ?? '', s.day);
+    if (day == null) return setTypeError('Type a date like 7/15/2012 or July 15, 2012.');
+    if (day < FIRST_DAY) return setTypeError(`The records start on ${formatDay(FIRST_DAY)}.`);
+    if (day > LAST_DAY) return router.push(`/predict?date=${isoDay(day)}`);
+    dispatch({ type: 'day', day });
+    stopTyping();
+  };
+
   const progress = seasonProgress(s.day, s.crop);
   return (
     <footer className="timeline">
@@ -209,7 +239,23 @@ export default function Timeline() {
           {s.playing ? <PauseIcon /> : <PlayIcon />}
         </button>
         <div className="tl-year">
-          <output className="tl-date">{formatDay(s.day)}</output>
+          {typing == null ? (
+            <button type="button" className="tl-date" onClick={startTyping} title="Type a date" aria-label={`Date: ${formatDay(s.day)}. Click to type a date.`}>
+              {formatDay(s.day)}
+            </button>
+          ) : (
+            <form className="tl-type" onSubmit={goToTyped}>
+              <input
+                className="tl-date-input" value={typing} autoFocus onFocus={e => e.target.select()}
+                aria-label="Type a date, then press Enter" placeholder="7/15/2012" aria-invalid={!!typeError} aria-describedby={typeError ? 'tl-type-error' : undefined}
+                onChange={e => { setTyping(e.target.value); setTypeError(null); }}
+                onKeyDown={e => { if (e.key === 'Escape') stopTyping(); }}
+                onBlur={() => { if (!typeError) stopTyping(); }}
+              />
+              {typeError && <p id="tl-type-error" className="tl-type-error" role="alert">{typeError}</p>}
+            </form>
+          )}
+          {typing == null && isPredictedDay(s.day) && <span className="tl-pred">Predicted</span>}
           <span>{CROP_TITLE[s.crop]}: {progress.label.toLowerCase()}</span>
         </div>
         <div

@@ -3,8 +3,9 @@ import { useDeferredValue, useEffect, useEffectEvent, useMemo, useReducer, useRe
 import { computeStyle, ringsOf } from '@/lib/compute';
 import { STATE_VIEW } from '@/lib/constants';
 import { dayContext, useDaily, yearOf } from '@/lib/daily';
+import { usePredict } from '@/lib/predict';
+import { useMyFarms } from '@/lib/farms';
 import { useAgData, type Outlines } from '@/lib/data';
-import type { HeightId } from '@/lib/metrics';
 import { initialState, reducer, toSearch, type MapMode } from '@/lib/state';
 import type { Bundle, City, StateCode } from '@/lib/types';
 import { ExplorerContext, NARROW_QUERY, useNarrow, useReducedMotion, type ExplorerApi } from './explorer-context';
@@ -49,10 +50,14 @@ function ExplorerReady({ bundle, outlines }: { bundle: Bundle; outlines: Outline
   // The selected date: that year's daily weather (loaded on demand) plus the weekly drought map in effect.
   const order = useMemo(() => new Map(bundle.counties.map((c, j) => [c.f, j])), [bundle]);
   const daily = useDaily(yearOf(s.day));
-  const t = useMemo(() => dayContext(s.day, order, daily.data, daily.normals), [s.day, order, daily.data, daily.normals]);
+  const predict = usePredict(yearOf(s.day));
+  const t = useMemo(() => dayContext(s.day, order, daily.data, daily.normals, predict),
+    [s.day, order, daily.data, daily.normals, predict.year, predict.statics, predict.index]); // eslint-disable-line react-hooks/exhaustive-deps
+  const myFarms = useMyFarms();
+  const farmFips = useMemo(() => new Set(myFarms?.farms.map(f => f.fips) ?? []), [myFarms]);
   const style = useMemo(
-    () => computeStyle(bundle.counties, rings, { metric: s.metric, height: s.height, crop: s.crop, yearIndex: i, states: s.states, reportedOnly: s.reportedOnly, conditions: s.conditions, hidden: s.hidden, t }),
-    [bundle, rings, s.metric, s.height, s.crop, i, s.states, s.reportedOnly, s.conditions, s.hidden, t],
+    () => computeStyle(bundle.counties, rings, { metric: s.metric, raised: s.raised, crop: s.crop, yearIndex: i, states: s.states, reportedOnly: s.reportedOnly, conditions: s.conditions, hidden: s.hidden, t, farmFips }),
+    [bundle, rings, s.metric, s.raised, s.crop, i, s.states, s.reportedOnly, s.conditions, s.hidden, t, farmFips],
   );
   const profileOpen = !!(s.county || s.state || s.outside);
 
@@ -137,13 +142,14 @@ function ExplorerReady({ bundle, outlines }: { bundle: Bundle; outlines: Outline
     const v = view.current;
     setCamera({ ...v, zoom: v.zoom + (mode === 'map' ? 0.45 : -0.45), duration: 0, nonce: ++nonce.current });
   };
-  const setHeight = (id: HeightId) => {
-    dispatch({ type: 'height', id });
-    // Tilt the map so raised counties can be seen; leave it alone when height is turned off.
-    if (id !== 'none' && view.current.pitch < 35) tilt(45);
+  /** 3D on raises the counties by the layer on the map and tilts so the heights show; 3D off lays it flat. */
+  const set3d = (on: boolean) => {
+    dispatch({ type: 'raised', on });
+    if (on && view.current.pitch < 35) tilt(50);
+    if (!on && view.current.pitch > 0) tilt(0);
   };
 
-  // Fly in from space once. A ref survives the explorer being hidden while the Plan page is open.
+  // Fly in from space once. A ref survives the explorer being hidden while another page is open.
   const flewIn = useRef(false);
   const flyIn = useEffectEvent(() => {
     flewIn.current = true;
@@ -190,7 +196,7 @@ function ExplorerReady({ bundle, outlines }: { bundle: Bundle; outlines: Outline
     return () => clearInterval(timer);
   }, [s.playing]);
 
-  const api: ExplorerApi = { bundle, byFips, s, i, t, dispatch, selectCounty, selectState, selectCity, zoomToCounty };
+  const api: ExplorerApi = { bundle, byFips, s, i, t, dispatch, selectCounty, selectState, selectCity, zoomToCounty, myFarms };
   // The profile follows a step behind the dial, so dragging stays smooth on phones.
   const lagging = useDeferredValue(api);
 
@@ -217,7 +223,7 @@ function ExplorerReady({ bundle, outlines }: { bundle: Bundle; outlines: Outline
                 setHeading(h => (h.bearing === bearing && h.pitch === pitch ? h : { bearing, pitch }));
               }}
             />
-            <LayersPanel style={style} onHeight={setHeight} />
+            <LayersPanel style={style} on3d={set3d} />
             <ExplorerContext.Provider value={lagging}><ProfilePanel /></ExplorerContext.Provider>
             <div className="mapctl" role="group" aria-label="Map controls">
               <button className="compass" onClick={faceNorth} title="Face north" aria-label={`Face north. Heading ${heading.bearing} degrees`}>
@@ -226,8 +232,8 @@ function ExplorerReady({ bundle, outlines }: { bundle: Bundle; outlines: Outline
                   <path d="M12 21l-3.2-9h6.4z" fill="#9AA39C" />
                 </svg>
               </button>
-              <button className="tilt" onClick={() => tilt(heading.pitch > 10 ? 0 : 50)} aria-pressed={heading.pitch > 10} title={heading.pitch > 10 ? 'Look straight down' : 'Tilt to 3D'}>
-                {heading.pitch > 10 ? '2D' : '3D'}
+              <button className="tilt" onClick={() => set3d(!s.raised)} aria-pressed={s.raised} title={s.raised ? 'Flatten the map' : 'Raise counties by this layer and tilt'}>
+                {s.raised ? '2D' : '3D'}
               </button>
               <button className="rot" onClick={() => turn(-30)} aria-label="Rotate left" title="Rotate left">
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.5H2.8v-2.7M3 3.4A6 6 0 1 1 2 8" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" /></svg>

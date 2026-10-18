@@ -2,6 +2,7 @@
 import { createContext, useContext, useSyncExternalStore, type Dispatch } from 'react';
 import type { Action, ExplorerState } from '@/lib/state';
 import type { DayContext } from '@/lib/daily';
+import type { MyFarms } from '@/lib/farms';
 import type { Bundle, City, County, StateCode } from '@/lib/types';
 
 export interface ExplorerApi {
@@ -17,6 +18,8 @@ export interface ExplorerApi {
   selectState: (code: StateCode) => void;
   selectCity: (city: City) => void;
   zoomToCounty: () => void;
+  /** The signed-in farmer's farms and saved models (null when signed out). */
+  myFarms: MyFarms | null;
 }
 
 export const ExplorerContext = createContext<ExplorerApi | null>(null);

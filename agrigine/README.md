@@ -12,7 +12,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000. The plan is at http://localhost:3000/plan.
+Open http://localhost:3000. The other pages are /reports, /predict, /account (profile) and /data (my farm data).
 
 For a production build: `npm run build && npm start`.
 
@@ -55,18 +55,28 @@ The script caches downloads in `data/raw/<source>/` and writes to `data/processe
 
 Each script also runs on its own from the `agrigine` folder, for example `python3 scripts/rma_pull.py`.
 
+### Predictions
+
+Three notebooks in `../notebooks/` make every prediction; run them in this order after the data steps (kernel: `notebooks/.venv`, scikit-learn 1.6.1):
+
+1. `Agrigine_Forecasts.ipynb`: 2026–2028 season forecasts, four candidate models per measure, tested on 2016–2025 → `notebooks/forecasts/`.
+2. `Agrigine_Daily_Predictions.ipynb`: day-by-day predictions (each season's expected yield, chance of severe drought, frost risk, typical weather), each year by a model that never saw it → `public/data/predict/`.
+3. `Agrigine_2026_2028.ipynb`: every layer for every day of 2026–2028, pre-run from Dec 31, 2025 → `public/data/daily/2026–2028.bin`, `public/data/predict/`.
+
+The app reads these as files, the same way as the daily weather; nothing runs a model in the browser.
+
 ## Where things are
 
 | Path | What it does |
 |---|---|
-| `app/page.tsx`, `app/plan/page.tsx` | The explorer and the plan page |
+| `app/page.tsx`, `app/reports/`, `app/predict/`, `app/account/`, `app/data/` | Explore, Report, Predict, the profile and my farm data |
 | `components/Explorer.tsx` | State, camera and layout for the explorer |
 | `components/GlobeMap.tsx` | The deck.gl globe and flat map |
-| `components/LayersPanel.tsx` | Layer picker, filtering key, height, filters |
+| `components/LayersPanel.tsx` | Layer picker, filtering key, 3D heights switch, filters |
 | `components/profile/` | The county, state and outside-the-data profiles |
 | `lib/metrics.ts` | Every layer: how it reads the data, its color bins and labels |
-| `lib/compute.ts` | Colors, heights and key counts for the current view |
+| `lib/compute.ts` | Colors, heights (from the key's bands) and key counts for the current view |
 | `lib/state.ts` | Explorer state and the shareable URL format |
 | `scripts/build_data.py` | Builds the data bundle from `../data` |
 
-Any view can be shared by its URL, for example `/?county=19007&year=2012&crop=C&layer=anom&height=wk&tab=drought`.
+Any view can be shared by its URL, for example `/?county=19007&date=2012-07-15&crop=C&layer=anom&3d=1&tab=drought`.

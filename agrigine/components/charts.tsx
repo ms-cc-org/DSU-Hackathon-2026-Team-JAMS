@@ -5,7 +5,7 @@ import { RAMP, SEVERITY, USDM } from '@/lib/colors';
 import { CROP_NAME, MONTH_LETTER, MONTH_SHORT, SEASON_MONTHS, STATES } from '@/lib/constants';
 import { MINUS, mean, niceCeil, num, ordinal, present } from '@/lib/format';
 import { metric, whyMissing, type MetricId } from '@/lib/metrics';
-import { calendarSlot, dayOf, dayValue, normalValue, seasonYearOf, yearOf } from '@/lib/daily';
+import { LAST_OBSERVED_YEAR, calendarSlot, dayOf, dayValue, normalValue, seasonYearOf, yearOf } from '@/lib/daily';
 import { seasonDays } from '@/lib/storms';
 import type { County, CropKey, CropSeries } from '@/lib/types';
 import { useExplorer } from './explorer-context';
@@ -64,9 +64,16 @@ export function YearBars({ values, color, tip, label, centered = false, unit = '
   const y = (v: number) => B - ((v - lo) / (hi - lo)) * (B - T);
   const y0 = y(0);
   const pick = (j: number) => dispatch({ type: 'year', year: years[j] });
+  const firstPredicted = years.findIndex(y => y > LAST_OBSERVED_YEAR);
   return (
     <svg viewBox={`0 0 ${W} ${h}`} className="chart" role="img" aria-label={label}>
       <rect x={L0 + si * step} y={T - 4} width={step} height={B - T + 8} rx={3} fill="var(--sel-band)" />
+      {firstPredicted > 0 && (
+        <g>
+          <line x1={L0 + firstPredicted * step} x2={L0 + firstPredicted * step} y1={T - 6} y2={B} stroke="var(--cat-storms)" strokeDasharray="3 3" />
+          <text x={L0 + firstPredicted * step + 3} y={T + 2} fontSize={9} fontWeight={700} fill="var(--cat-storms)">PREDICTED</text>
+        </g>
+      )}
       <line x1={L0} x2={R0} y1={y0} y2={y0} stroke="var(--line-2)" />
       <Tick x={L0 - 6} y={y(hi) + 4}>{`${centered ? '+' : ''}${num(hi)}${unit}`}</Tick>
       <Tick x={L0 - 6} y={y0 + 4}>0</Tick>
@@ -78,7 +85,7 @@ export function YearBars({ values, color, tip, label, centered = false, unit = '
             {v == null ? (
               <circle cx={x + bw / 2} cy={y0} r={1.6} fill="var(--muted)" opacity={0.7} />
             ) : (
-              <path d={barPath(x, y0, y(Math.max(lo, Math.min(hi, v))), bw, 2)} fill={color(v, j)} />
+              <path d={barPath(x, y0, y(Math.max(lo, Math.min(hi, v))), bw, 2)} fill={color(v, j)} opacity={years[j] > LAST_OBSERVED_YEAR ? 0.45 : 1} />
             )}
             <rect
               className="hitbar" role="button" tabIndex={0} aria-label={tip(j)}

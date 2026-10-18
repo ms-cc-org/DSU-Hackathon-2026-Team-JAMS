@@ -3,21 +3,22 @@
 import type { BinKey } from './compute';
 import { FIRST_DAY, FIRST_YEAR, LAST_DAY, LAST_YEAR, clampDay, dayOf, isoDay, parseIsoDay, sameDateInSeason, seasonYearOf } from './daily';
 import { CROPS, STATE_CODES } from './constants';
-import { CATEGORY_IDS, HEIGHT_IDS, METRIC_IDS, metric, reported, type CategoryId, type HeightId, type MetricId } from './metrics';
+import { CATEGORY_IDS, METRIC_IDS, metric, reported, type CategoryId, type MetricId } from './metrics';
 import type { Bundle, CropKey, StateCode } from './types';
 
 export type TabId = 'overview' | 'crops' | 'weather' | 'drought' | 'storms' | 'land' | 'sat';
 export const TAB_IDS: TabId[] = ['overview', 'crops', 'weather', 'drought', 'storms', 'land', 'sat'];
 /** "Show only" filters: severe drought this season, damaging storms this season, a long yield record. */
-export type ConditionId = 'drought' | 'storms' | 'longRecord';
-export const CONDITION_IDS: ConditionId[] = ['drought', 'storms', 'longRecord'];
+export type ConditionId = 'drought' | 'storms' | 'longRecord' | 'myFarms';
+export const CONDITION_IDS: ConditionId[] = ['drought', 'storms', 'longRecord', 'myFarms'];
 export type MapMode = 'globe' | 'map';
-export type RefLayer = 'imagery' | 'dayphoto' | 'cities' | 'borders' | 'states' | 'counties' | 'labels';
+export type RefLayer = 'imagery' | 'dayphoto' | 'farms' | 'cities' | 'borders' | 'states' | 'counties' | 'labels';
 
 export interface ExplorerState {
   mode: MapMode;
   metric: MetricId;
-  height: HeightId;
+  /** Raise counties by the layer on the map: higher on its key, taller county. */
+  raised: boolean;
   crop: CropKey;
   /** The selected date, as days since 2000-01-01. */
   day: number;
@@ -27,6 +28,8 @@ export interface ExplorerState {
   reportedOnly: boolean;
   conditions: ConditionId[];
   hidden: BinKey[];
+  /** Saved farm models whose predictions are shown on the map and in profiles (ids; not put in the URL). */
+  shownModels: string[];
   refs: Record<RefLayer, boolean>;
   county: string | null;
   state: StateCode | null;
@@ -39,7 +42,7 @@ export interface ExplorerState {
 
 export type Action =
   | { type: 'metric'; id: MetricId }
-  | { type: 'height'; id: HeightId }
+  | { type: 'raised'; on: boolean }
   | { type: 'crop'; crop: CropKey }
   | { type: 'day'; day: number }
   | { type: 'year'; year: number }
@@ -49,6 +52,7 @@ export type Action =
   | { type: 'condition'; id: ConditionId }
   | { type: 'toggleBin'; bin: BinKey }
   | { type: 'showAllBins' }
+  | { type: 'farmModel'; id: string; on: boolean }
   | { type: 'ref'; layer: RefLayer; on: boolean }
   | { type: 'county'; fips: string }
   | { type: 'state'; code: StateCode }
@@ -71,8 +75,8 @@ export function reducer(s: ExplorerState, a: Action): ExplorerState {
   switch (a.type) {
     case 'metric':
       return { ...s, metric: a.id, openCategory: metric(a.id).cat, hidden: [], playing: metric(a.id).fixed ? false : s.playing };
-    case 'height':
-      return { ...s, height: a.id };
+    case 'raised':
+      return { ...s, raised: a.on };
     case 'crop':
       return { ...atDay(s, s.day, a.crop), hidden: [] };
     case 'day':
@@ -94,6 +98,8 @@ export function reducer(s: ExplorerState, a: Action): ExplorerState {
       return { ...s, hidden: s.hidden.includes(a.bin) ? s.hidden.filter(b => b !== a.bin) : [...s.hidden, a.bin] };
     case 'showAllBins':
       return { ...s, hidden: [] };
+    case 'farmModel':
+      return { ...s, shownModels: a.on ? [...new Set([...s.shownModels, a.id])] : s.shownModels.filter(x => x !== a.id) };
     case 'ref':
       return { ...s, refs: { ...s.refs, [a.layer]: a.on } };
     case 'county':
@@ -133,7 +139,8 @@ export function initialState(bundle: Bundle, search: string, narrow: boolean): E
   const s: ExplorerState = {
     mode: pick(q.get('view'), ['globe', 'map'] as const) ?? 'globe',
     metric: metricId,
-    height: pick(q.get('height'), HEIGHT_IDS) ?? 'none',
+    // ?3d=1, or a link from before heights followed the layer (?height=wk).
+    raised: q.get('3d') === '1' || (!!q.get('height') && q.get('height') !== 'none'),
     crop,
     day,
     year: seasonYearOf(day, crop),
@@ -141,7 +148,8 @@ export function initialState(bundle: Bundle, search: string, narrow: boolean): E
     reportedOnly: false,
     conditions: (q.get('only') ?? '').split(',').filter((v): v is ConditionId => (CONDITION_IDS as string[]).includes(v)),
     hidden: [],
-    refs: { imagery: true, dayphoto: false, cities: true, borders: true, states: true, counties: true, labels: true },
+    shownModels: [],
+    refs: { imagery: true, dayphoto: false, farms: true, cities: true, borders: true, states: true, counties: true, labels: true },
     county: fips && bundle.counties.some(c => c.f === fips) ? fips : null,
     state: code ?? null,
     outside: null,
@@ -173,7 +181,7 @@ export function toSearch(s: ExplorerState): string {
   q.set('date', isoDay(s.day));
   q.set('crop', s.crop);
   q.set('layer', s.metric);
-  q.set('height', s.height);
+  if (s.raised) q.set('3d', '1');
   if (s.mode !== 'globe') q.set('view', s.mode);
   if (s.conditions.length) q.set('only', s.conditions.join(','));
   if (s.county && s.tab !== 'overview') q.set('tab', s.tab);

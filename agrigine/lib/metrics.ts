@@ -1,10 +1,11 @@
 // Every layer the map can be colored or raised by. A layer reads one value per county for a crop and season.
 import { divBins, seqBins, zeroBins, type Bin } from './bins';
 import { NEUTRAL, RAMP, SEVERITY, SEVERITY_SHORT, USDM } from './colors';
-import { CROP_NAME, MAX_WEEKS } from './constants';
+import { CROP_NAME } from './constants';
 import { dayOfYear, num, pct, plural, signed, thousands } from './format';
-import { DAMAGING, money, stormSeason } from './storms';
-import { dateOf, dayValue, droughtOn, normalValue, seasonToDate, type DayContext } from './daily';
+import { DAMAGING, money, seasonDays, stormSeason, typicalWeek } from './storms';
+import { dateOf, dayValue, droughtOn, isPredictedDay, normalValue, seasonToDate, type DayContext } from './daily';
+import { expectedYield, frostRisk, predicted } from './predict';
 import { LOSS_COLOR, LOSS_LABEL, insuranceMonth, insuranceSeason, mainCause } from './insurance';
 import type { County, CropKey, SeriesField } from './types';
 
@@ -31,6 +32,8 @@ export interface Metric {
   worse: 'low' | 'high' | null;
   /** Soil layers don't change by season. */
   fixed?: boolean;
+  /** Made by a model or from the county's history, not measured; labeled in the layer list. */
+  predicted?: boolean;
   /** i is the season-year index; t is the selected date, which day-by-day layers read. */
   get: (c: County, k: CropKey, i: number, t?: DayContext) => number | null;
   bins: (k: CropKey) => Bin[];
@@ -41,7 +44,7 @@ export interface Metric {
 /** A reported-yield field: null unless NASS published a yield that season. */
 export const reported = (c: County, k: CropKey, i: number, f: SeriesField) => {
   const d = c.d[k];
-  return d && d.st[i] === 'r' && d[f][i] != null ? d[f][i] : null;
+  return d && (d.st[i] === 'r' || d.st[i] === 'p') && d[f][i] != null ? d[f][i] : null;
 };
 /** A growing-season field (weather, drought): present whenever the county grows the crop. */
 export const season = (c: County, k: CropKey, i: number, f: SeriesField) => {
@@ -61,6 +64,7 @@ const FIRST_YEAR = 2000;
 const derived = (c: County, k: CropKey, i: number, f: 'hn' | 'fh' | 'dry' | 'hr') => c.sw?.[k]?.[f][i] ?? null;
 const storm = (c: County, k: CropKey, i: number) => stormSeason(c, k, FIRST_YEAR + i);
 const stormBins = (cuts: number[]) => zeroBins(cuts, RAMP.purple.slice(0, 4), String);
+const chanceBins = (ramp: string[]) => seqBins([10, 25, 50, 75], ramp, v => `${v}%`);
 const moneyBins = (cuts: number[]) => [{ color: NEUTRAL, test: (v: number) => v <= 0, label: 'None' }, ...seqBins(cuts, RAMP.red, money)];
 const rainBins = (cuts: number[]) => [{ color: NEUTRAL, test: (v: number) => v < 0.3, label: 'No rain' }, ...seqBins(cuts, RAMP.blue.slice(0, 4), v => `${v} mm`)];
 
@@ -120,6 +124,12 @@ export const METRICS = {
     bins: () => seqBins([300, 700, 1100, 1500], RAMP.green, v => num(v)),
     format: v => `${num(v)} GDD so far`, short: v => num(v),
   },
+  pFrost: {
+    cat: 'weather', name: 'Frost risk for this date', unit: 'before July: % of years with another freeze after this date; from July: % with a freeze by this date (2000–2025)', kind: 'daily', worse: 'high', predicted: true,
+    get: (c, _k, _i, t) => frostRisk(t, c)?.pct ?? null,
+    bins: () => [{ color: NEUTRAL, test: (v: number) => v <= 0, label: 'No risk' }, ...seqBins([5, 10, 25, 50], RAMP.purple, v => `${v}%`)],
+    format: v => `${num(v)}% frost risk`, short: v => `${num(v)}%`,
+  },
   dHot: {
     cat: 'weather', name: 'Hot days so far', unit: 'days at 35 °C or hotter from the start of the season to this date', kind: 'daily', worse: 'high',
     get: (c, k, _i, t) => seasonToDate(t, c, k, 'hot'),
@@ -138,11 +148,24 @@ export const METRICS = {
     bins: () => zeroBins([50, 100, 200], RAMP.orange.slice(0, 4), String),
     format: v => `DSCI ${v}`, short: String,
   },
+  pDrought4: {
+    cat: 'drought', name: 'Chance of severe drought in 4 weeks', unit: '% chance a Drought Monitor map in the next 4 weeks shows D2 or worse here (predicted)', kind: 'daily', worse: 'high', predicted: true,
+    get: (c, _k, _i, t) => predicted(t, 'drought_4w', c),
+    bins: () => chanceBins(RAMP.orange),
+    format: v => `${num(v)}% chance of severe drought within 4 weeks`, short: v => `${num(v)}%`,
+  },
+  pDrought8: {
+    cat: 'drought', name: 'Chance of severe drought in 8 weeks', unit: '% chance a Drought Monitor map in the next 8 weeks shows D2 or worse here (predicted)', kind: 'daily', worse: 'high', predicted: true,
+    get: (c, _k, _i, t) => predicted(t, 'drought_8w', c),
+    bins: () => chanceBins(RAMP.orange),
+    format: v => `${num(v)}% chance of severe drought within 8 weeks`, short: v => `${num(v)}%`,
+  },
   dStorms7: {
-    cat: 'storms', name: 'Storms, last 7 days', unit: 'hail, wind, tornado and flood reports in the 7 days up to this date', kind: 'daily', worse: 'high',
-    get: (c, _k, _i, t) => (t ? (c.ev ?? []).filter(e => e[0] <= t.day && e[0] > t.day - 7 && DAMAGING.includes(e[1])).length : null),
+    cat: 'storms', name: 'Storms, last 7 days', unit: 'hail, wind, tornado and flood reports in the 7 days up to this date; after 2025, the 2000–2025 average for those dates', kind: 'daily', worse: 'high',
+    get: (c, _k, _i, t) => (!t ? null : isPredictedDay(t.day) ? typicalWeek(c, t.day)
+      : (c.ev ?? []).filter(e => e[0] <= t.day && e[0] > t.day - 7 && DAMAGING.includes(e[1])).length),
     bins: () => stormBins([2, 4, 8]),
-    format: v => plural(v, 'storm report'), short: String,
+    format: v => (v % 1 ? `${num(v, 1)} storm reports on average` : plural(v, 'storm report')), short: v => num(v, v % 1 ? 1 : 0),
   },
   dVpd: {
     cat: 'weather', name: 'Dry air (VPD)', unit: 'vapor pressure deficit, kPa: how hard the air pulls water from plants', kind: 'daily', worse: 'high',
@@ -197,6 +220,12 @@ export const METRICS = {
     get: (c, _k, _i, t) => { const v = dayValue(t, 'soil', c), n = normalValue(t, 'soil', c); return v == null || n == null ? null : v - n; },
     bins: () => divBins([3, 8, 15], RAMP.divDry, RAMP.divWet, v => `${signed(v)} pts`),
     format: v => `${signed(v)} points vs normal`, short: v => signed(v),
+  },
+  pYield: {
+    cat: 'crops', name: 'Expected yield this season', unit: '% above or below the county trend for the season this date belongs to, as predicted on this date', kind: 'daily', worse: 'low', predicted: true,
+    get: (c, k, _i, t) => expectedYield(t, k, c, seasonDays)?.pct ?? null,
+    bins: () => divBins([3, 8, 15], RAMP.divRed, RAMP.divBlue, v => pct(v)),
+    format: v => `${pct(v, 1)} vs trend, expected for the season`, short: v => pct(v),
   },
   insMonth: {
     cat: 'crops', name: 'Insurance payouts this month', unit: 'USD paid for crop losses that happened in this calendar month', kind: 'daily', worse: 'high',
@@ -353,31 +382,31 @@ export const METRICS = {
     cat: 'storms', name: 'Damaging storms', unit: 'reported hail, wind, tornado and flood events, growing season', kind: 'storm', worse: 'high',
     get: (c, k, i) => storm(c, k, i).damaging,
     bins: () => stormBins([4, 8, 16]),
-    format: v => plural(v, 'damaging storm report'), short: String,
+    format: v => plural(v, 'damaging storm report'), short: v => num(v, v % 1 ? 1 : 0),
   },
   hail: {
     cat: 'storms', name: 'Hail', unit: 'reported hail events, growing season', kind: 'storm', worse: 'high',
     get: (c, k, i) => storm(c, k, i).byType[0],
     bins: () => stormBins([3, 6, 10]),
-    format: v => plural(v, 'hail report'), short: String,
+    format: v => plural(v, 'hail report'), short: v => num(v, v % 1 ? 1 : 0),
   },
   wind: {
     cat: 'storms', name: 'Damaging wind', unit: 'reported thunderstorm and high-wind events, including derechos', kind: 'storm', worse: 'high',
     get: (c, k, i) => storm(c, k, i).byType[1],
     bins: () => stormBins([3, 6, 10]),
-    format: v => plural(v, 'wind report'), short: String,
+    format: v => plural(v, 'wind report'), short: v => num(v, v % 1 ? 1 : 0),
   },
   tornado: {
     cat: 'storms', name: 'Tornadoes', unit: 'reported tornadoes, growing season', kind: 'storm', worse: 'high',
     get: (c, k, i) => storm(c, k, i).byType[2],
     bins: () => stormBins([2, 4, 6]),
-    format: v => plural(v, 'tornado', 'tornadoes'), short: String,
+    format: v => plural(v, 'tornado', 'tornadoes'), short: v => num(v, v % 1 ? 1 : 0),
   },
   floods: {
     cat: 'storms', name: 'Floods', unit: 'reported flood and flash-flood events, growing season', kind: 'storm', worse: 'high',
     get: (c, k, i) => storm(c, k, i).byType[3],
     bins: () => stormBins([2, 4, 8]),
-    format: v => plural(v, 'flood report'), short: String,
+    format: v => plural(v, 'flood report'), short: v => num(v, v % 1 ? 1 : 0),
   },
   cropDamage: {
     cat: 'storms', name: 'Crop damage', unit: 'U.S. dollars of crop damage reported to NOAA, growing season', kind: 'storm', worse: 'high',
@@ -432,33 +461,6 @@ export const METRICS = {
 export type MetricId = keyof typeof METRICS;
 export const METRIC_IDS = Object.keys(METRICS) as MetricId[];
 export const metric = (id: MetricId): Metric => METRICS[id];
-
-export interface HeightLayer {
-  name: string;
-  get?: (c: County, k: CropKey, i: number, t?: DayContext) => number | null;
-  max?: (k: CropKey) => number;
-}
-const loss = (v: number | null) => (v == null ? null : Math.max(0, -v));
-export const HEIGHTS = {
-  none: { name: 'Flat, no height' },
-  dDry: { name: 'Days since rain (this date)', get: (c, _k, _i, t) => dayValue(t, 'dry', c), max: () => 45 },
-  dDeficit: { name: 'Rain shortfall, last 30 days', get: (c, _k, _i, t) => { const v = dayValue(t, 'rain30', c), n = normalValue(t, 'rain30', c); return v == null || n == null ? null : Math.max(0, n - v); }, max: () => 100 },
-  wk: { name: 'Weeks in severe drought', get: (c, k, i) => season(c, k, i, 'wk'), max: k => MAX_WEEKS[k] },
-  loss: { name: 'Yield loss below trend', get: (c, k, i) => loss(reported(c, k, i, 'a')), max: () => 40 },
-  dsci: { name: 'Drought intensity', get: (c, k, i) => season(c, k, i, 'ds'), max: () => 400 },
-  deficit: { name: 'Rain deficit', get: (c, k, i) => loss(season(c, k, i, 'pa')), max: () => 60 },
-  heat: { name: 'Days at 35 °C or hotter', get: (c, k, i) => season(c, k, i, 'ht'), max: () => 30 },
-  yield: { name: 'Yield', get: (c, k, i) => reported(c, k, i, 'y'), max: k => ({ C: 240, S: 70, W: 90, G: 130 })[k] },
-  prod: { name: 'Production', get: production, max: k => ({ C: 40, S: 8, W: 3, G: 1.5 })[k] },
-  insPerAcre: { name: 'Insurance payouts per acre', get: (c, k, i) => { const s = insuranceSeason(c, k, i), ap = c.d[k]?.ap[i]; return s == null || !ap ? null : s.total / ap; }, max: () => 150 },
-  storms: { name: 'Damaging storm reports', get: (c, k, i) => storm(c, k, i).damaging, max: () => 16 },
-  droughty: { name: 'Drought-prone soil', get: c => c.dr, max: () => 100 },
-  greenDrop: { name: 'Greenness drop', get: (c, _k, i) => loss(c.md?.na[i] ?? null), max: () => 12 },
-} satisfies Record<string, HeightLayer>;
-
-export type HeightId = keyof typeof HEIGHTS;
-export const HEIGHT_IDS = Object.keys(HEIGHTS) as HeightId[];
-export const height = (id: HeightId): HeightLayer => HEIGHTS[id];
 
 /** Why a county has no value for a layer, in words a user can act on. */
 export function whyMissing(c: County, id: MetricId, k: CropKey, i: number): string {

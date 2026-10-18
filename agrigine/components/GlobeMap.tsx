@@ -6,13 +6,19 @@ import DeckGL from '@deck.gl/react';
 import type { Feature } from 'geojson';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { City } from '@/lib/types';
+import type { Farm, SavedFarmModel } from '@/lib/account';
+import { CROP_KEY, CROP_LABEL } from '@/lib/farmcsv';
+import { savedModelValue } from '@/lib/farmmodel';
+import { modelName } from '@/lib/farms';
+
+interface FarmPin { farm: Farm; pos: [number, number]; models: SavedFarmModel[]; label: string }
 import { MAP, rgb } from '@/lib/colors';
 import type { MapStyle, Ring } from '@/lib/compute';
 import { CROP_NAME, STATES, STATE_BY_FIPS, STATE_CODES, STATE_VIEW } from '@/lib/constants';
 import type { Outlines } from '@/lib/data';
 import { num } from '@/lib/format';
-import { formatDay, isoDay } from '@/lib/daily';
-import { height, metric, whyMissing } from '@/lib/metrics';
+import { formatDay, isPredictedDay, isPredictedYear, isoDay, seasonYearOf } from '@/lib/daily';
+import { metric, whyMissing } from '@/lib/metrics';
 import { useExplorer } from './explorer-context';
 
 /** Where the camera should go. A new `nonce` makes the map fly there even if it's the same place as before. */
@@ -78,7 +84,7 @@ interface Props {
 }
 
 export default function GlobeMap({ style, rings, outlines, camera, reduced, onView, onKeyDown }: Props) {
-  const { s, i, t, bundle, byFips, dispatch, selectCounty, selectState, selectCity } = useExplorer();
+  const { s, i, bundle, byFips, dispatch, selectCounty, selectState, selectCity, myFarms } = useExplorer();
   const [failed, setFailed] = useState(false);
   const [elevation, setElevation] = useState(() => elevationFor(camera.zoom));
   const [zoom, setZoom] = useState(camera.zoom);
@@ -102,6 +108,18 @@ export default function GlobeMap({ style, rings, outlines, camera, reduced, onVi
     () => (bundle.cities ?? []).filter(c => c[5] >= minPopulation && s.states.includes(c[1])),
     [bundle, minPopulation, s.states],
   );
+  // The signed-in farmer's farms: at the spot they set, or their county's center
+  const farmPins = useMemo(() => (!s.refs.farms || !myFarms ? [] : myFarms.farms.flatMap(f => {
+    const c = byFips.get(f.fips), pos = f.lon != null && f.lat != null ? [f.lon, f.lat] : c?.c;
+    if (!pos) return [];
+    const models = myFarms.models.filter(m => m.farm_id === f.id);
+    // Each shown model adds its yield for the season on the dial: "Corn 207 bu/ac (2026)"
+    const shown = c ? models.filter(m => s.shownModels.includes(m.id)).flatMap(m => {
+      const k = CROP_KEY[m.crop], season = seasonYearOf(s.day, k), v = savedModelValue(m, c, k, bundle.years, season);
+      return v ? [`${CROP_LABEL[m.crop]} ${num(v.value)} bu/ac (${season}${v.predicted ? ', predicted' : ''})`] : [];
+    }) : [];
+    return [{ farm: f, pos: pos as [number, number], models, label: [f.name, ...shown].join('\n') }];
+  })), [s.refs.farms, s.shownModels, s.day, myFarms, byFips, bundle]);
   // deck.gl draws text into its own atlas, so it needs the resolved font name rather than the CSS variable.
   const [font] = useState(() => getComputedStyle(document.body).fontFamily || 'system-ui, sans-serif');
 
@@ -122,9 +140,9 @@ export default function GlobeMap({ style, rings, outlines, camera, reduced, onVi
   );
 
   const layers = useMemo(() => {
-    const raised = s.height !== 'none';
+    const raised = s.raised;
     const sat = s.refs.imagery;
-    const key = `${s.metric}|${s.height}|${s.crop}|${s.day}|${style.byFips.size}|${s.hidden.join()}|${s.states.join()}|${s.reportedOnly}|${sat}`;
+    const key = `${s.metric}|${s.raised}|${s.crop}|${s.day}|${style.byFips.size}|${s.hidden.join()}|${s.states.join()}|${s.reportedOnly}|${sat}`;
     const selected = s.county ? byFips.get(s.county) : undefined;
     const selZ = (s.county ? style.byFips.get(s.county)?.height ?? 0 : 0) * elevation + 300;
     const selRings = selected ? rings.filter(r => r.f === selected.f) : [];
@@ -202,6 +220,17 @@ export default function GlobeMap({ style, rings, outlines, camera, reduced, onVi
         getColor: sat ? [255, 255, 255, 245] : [20, 32, 26, 240], parameters: { depthCompare: 'always', depthWriteEnabled: false },
         updateTriggers: { getColor: sat, getPosition: lift },
       }),
+      farmPins.length > 0 && new ScatterplotLayer<FarmPin>({
+        id: 'farm-pins', data: farmPins, getPosition: d => [d.pos[0], d.pos[1], lift * 1.2], getRadius: 7, radiusUnits: 'pixels',
+        getFillColor: [134, 194, 118, 255], stroked: true, getLineColor: [20, 32, 26, 255], lineWidthUnits: 'pixels', getLineWidth: 2.5,
+        pickable: true, parameters: { depthCompare: 'always', depthWriteEnabled: false }, updateTriggers: { getPosition: lift },
+      }),
+      farmPins.length > 0 && new TextLayer<FarmPin>({
+        id: 'farm-names', data: farmPins, getPosition: d => [d.pos[0], d.pos[1], lift * 1.2], getText: d => d.label, getSize: 13, lineHeight: 1.25, sizeUnits: 'pixels',
+        getPixelOffset: [0, -16], getTextAnchor: 'middle', getAlignmentBaseline: 'bottom', fontFamily: font, fontWeight: 800, characterSet: 'auto',
+        fontSettings: { sdf: true }, outlineWidth: 3, outlineColor: [20, 32, 26, 235], getColor: [214, 240, 204, 255],
+        parameters: { depthCompare: 'always', depthWriteEnabled: false }, updateTriggers: { getPosition: lift, getText: farmPins },
+      }),
       labels.length > 0 && new TextLayer<Label>({
         id: 'labels', data: labels, getPosition: d => d.position as [number, number, number], getText: d => d.text, getSize: d => d.size, sizeUnits: 'pixels',
         getColor: sat ? [255, 255, 255, 245] : withAlpha(MAP.ink, 235), fontFamily: font, fontWeight: 700, characterSet: 'auto',
@@ -211,7 +240,7 @@ export default function GlobeMap({ style, rings, outlines, camera, reduced, onVi
         getTextAnchor: 'middle', getAlignmentBaseline: 'center', updateTriggers: { getPosition: `${selZ}|${lift}`, getColor: sat },
       }),
     ];
-  }, [photoDate, cities, s.mode, s.metric, s.height, s.crop, s.day, s.hidden, s.states, s.reportedOnly, s.refs, s.county, style, rings, outlines, elevation, font, byFips, reduced]);
+  }, [farmPins, photoDate, cities, s.mode, s.metric, s.raised, s.crop, s.day, s.hidden, s.states, s.reportedOnly, s.refs, s.county, style, rings, outlines, elevation, font, byFips, reduced]);
 
   /** The hover card's HTML for whatever is under the pointer, or null. */
   const tooltipHtml = ({ object, layer }: PickingInfo): string | null => {
@@ -221,6 +250,11 @@ export default function GlobeMap({ style, rings, outlines, camera, reduced, onVi
       if (STATE_BY_FIPS[String(f.id)]) return null;
       return `<b>${esc(String(f.properties?.name ?? ''))}</b><div class="dim">Not in the hackathon data. Agrigine covers California, Delaware, Iowa and Nebraska.</div>`;
     }
+    if (layer.id === 'farm-pins') {
+      const p = object as FarmPin, c = byFips.get(p.farm.fips);
+      const lines = p.models.map(m => `<div>${esc(CROP_LABEL[m.crop])} · ${esc(modelName(m.kind))}: ${m.predictions.map(q => `${q.year} <b>${num(q.value)}</b>`).join(', ')} bu/ac</div>`).join('');
+      return `<b>${esc(p.farm.name)}</b><div class="dim">Your farm · ${c ? esc(c.n) + ' County' : ''}</div>${lines || '<div class="dim">No saved models yet</div>'}<div class="dim" style="margin-top:4px">Click for the county profile</div>`;
+    }
     if (layer.id === 'city-dots') {
       const city = object as City, home = byFips.get(city[2]);
       return `<b>${esc(city[0])}, ${STATES[city[1]]}</b><div>${num(city[5])} people (2024 estimate)</div><div class="dim">${home ? esc(home.n) + ' County · ' : ''}click to open the county</div>`;
@@ -229,12 +263,11 @@ export default function GlobeMap({ style, rings, outlines, camera, reduced, onVi
     const c = byFips.get((object as Ring).f);
     const st = c && style.byFips.get(c.f);
     if (!c || !st) return null;
-    const m = metric(s.metric), h = height(s.height);
-    const when = m.kind === 'daily' ? formatDay(s.day) : m.fixed ? 'Soil' : `${s.year} ${CROP_NAME[s.crop]} season`;
+    const m = metric(s.metric);
+    const future = !m.fixed && (m.kind === 'daily' ? isPredictedDay(s.day) : isPredictedYear(s.year));
+    const when = (m.kind === 'daily' ? formatDay(s.day) : m.fixed ? 'Soil' : `${s.year} ${CROP_NAME[s.crop]} season`) + (future || m.predicted ? ' · predicted' : '');
     let html = `<b>${esc(c.n)} County, ${c.s}</b><div class="dim">${when}</div>`;
     html += `<div style="margin-top:4px;display:flex;gap:6px;align-items:center"><i style="width:10px;height:10px;border-radius:2px;background:${st.color ?? '#F1EFE6'};box-shadow:inset 0 0 0 1px rgba(20,32,26,.25)"></i>${esc(m.name)}: <b>${esc(st.value != null ? m.format(st.value) : whyMissing(c, s.metric, s.crop, i))}</b></div>`;
-    const hv = h.get?.(c, s.crop, i, t);
-    if (hv != null) html += `<div>Height: ${esc(h.name)}, ${num(hv, hv % 1 && hv < 10 ? 1 : 0)}</div>`;
     html += '<div class="dim" style="margin-top:4px">Click for the full profile</div>';
     return html;
   };
@@ -258,6 +291,7 @@ export default function GlobeMap({ style, rings, outlines, camera, reduced, onVi
     if (!object || !layer) return;
     if (layer.id === 'counties') selectCounty((object as Ring).f);
     else if (layer.id === 'city-dots') selectCity(object as City);
+    else if (layer.id === 'farm-pins') selectCounty((object as FarmPin).farm.fips);
     else if (layer.id === 'us-states') {
       const f = object as Feature;
       const code = STATE_BY_FIPS[String(f.id)];

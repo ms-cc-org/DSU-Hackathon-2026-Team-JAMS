@@ -1,0 +1,55 @@
+field,county,crop,year,yield_bu_per_acre,acres,planted_on,harvested_on,irrigated,notes
+North 80,"Story County, Iowa",corn,2008,176.9,80,2008-04-27,2008-10-19,no,
+River bottom,"Story County, Iowa",soybeans,2008,44.7,40,2008-05-20,2008-10-06,no,
+Home quarter,"Story County, Iowa",corn,2008,172.5,160,2008-04-26,2008-10-21,no,
+North 80,"Story County, Iowa",soybeans,2009,53.6,80,2009-05-16,2009-10-02,no,
+River bottom,"Story County, Iowa",corn,2009,160.8,40,2009-04-28,2009-10-23,no,
+Home quarter,"Story County, Iowa",soybeans,2009,53.9,160,2009-05-20,2009-10-06,no,
+North 80,"Story County, Iowa",corn,2010,182.7,80,2010-04-28,2010-10-22,no,
+River bottom,"Story County, Iowa",soybeans,2010,46.9,40,2010-05-13,2010-09-29,no,
+Home quarter,"Story County, Iowa",corn,2010,161.9,160,2010-05-05,2010-10-24,no,
+North 80,"Story County, Iowa",soybeans,2011,54.0,80,2011-05-15,2011-10-06,no,
+River bottom,"Story County, Iowa",corn,2011,148.4,40,2011-04-27,2011-10-22,no,
+Home quarter,"Story County, Iowa",soybeans,2011,54.8,160,2011-05-19,2011-09-28,no,
+North 80,"Story County, Iowa",corn,2012,175.1,80,2012-04-28,2012-10-24,no,Drought; corn fired in July
+River bottom,"Story County, Iowa",soybeans,2012,49.2,40,2012-05-13,2012-10-08,no,Drought; pods aborted in August
+Home quarter,"Story County, Iowa",corn,2012,165.6,160,2012-04-26,2012-10-17,no,Drought; corn fired in July
+North 80,"Story County, Iowa",soybeans,2013,43.8,80,2013-05-20,2013-10-09,no,"Wet spring, then dry August"
+River bottom,"Story County, Iowa",corn,2013,140.4,40,2013-05-05,2013-10-12,no,"Wet spring, then dry August"
+Home quarter,"Story County, Iowa",soybeans,2013,43.7,160,2013-05-13,2013-10-09,no,"Wet spring, then dry August"
+North 80,"Story County, Iowa",corn,2014,186.3,80,2014-05-03,2014-10-19,no,
+River bottom,"Story County, Iowa",soybeans,2014,44.0,40,2014-05-20,2014-10-04,no,
+Home quarter,"Story County, Iowa",corn,2014,178.6,160,2014-05-03,2014-10-21,no,
+North 80,"Story County, Iowa",soybeans,2015,55.5,80,2015-05-15,2015-10-01,no,
+River bottom,"Story County, Iowa",corn,2015,184.1,40,2015-05-04,2015-10-13,no,
+Home quarter,"Story County, Iowa",soybeans,2015,53.7,160,2015-05-16,2015-10-04,no,
+North 80,"Story County, Iowa",corn,2016,232.8,80,2016-04-26,2016-10-17,no,
+River bottom,"Story County, Iowa",soybeans,2016,56.9,40,2016-05-17,2016-10-09,no,
+Home quarter,"Story County, Iowa",corn,2016,211.9,160,2016-05-05,2016-10-13,no,
+North 80,"Story County, Iowa",soybeans,2017,64.4,80,2017-05-21,2017-10-01,no,
+River bottom,"Story County, Iowa",corn,2017,198.6,40,2017-05-05,2017-10-13,no,
+Home quarter,"Story County, Iowa",soybeans,2017,60.2,160,2017-05-20,2017-10-08,no,
+North 80,"Story County, Iowa",corn,2018,202.5,80,2018-05-02,2018-10-20,no,
+River bottom,"Story County, Iowa",soybeans,2018,53.9,40,2018-05-18,2018-09-30,no,
+Home quarter,"Story County, Iowa",corn,2018,212.4,160,2018-05-03,2018-10-15,no,
+North 80,"Story County, Iowa",soybeans,2019,53.3,80,2019-06-17,2019-10-02,no,"Wet spring, planted late"
+River bottom,"Story County, Iowa",corn,2019,181.3,40,2019-05-29,2019-10-13,no,"Wet spring, planted late"
+Home quarter,"Story County, Iowa",soybeans,2019,51.3,160,2019-06-09,2019-10-01,no,"Wet spring, planted late"
+North 80,"Story County, Iowa",corn,2020,143.6,80,2020-05-05,2020-10-20,no,Derecho Aug 10 flattened part of the field
+River bottom,"Story County, Iowa",soybeans,2020,54.2,40,2020-05-17,2020-10-09,no,
+Home quarter,"Story County, Iowa",corn,2020,141.0,160,2020-05-02,2020-10-12,no,Derecho Aug 10 flattened part of the field
+North 80,"Story County, Iowa",soybeans,2021,70.8,80,2021-05-19,2021-10-10,no,
+River bottom,"Story County, Iowa",corn,2021,202.2,40,2021-05-02,2021-10-18,no,
+Home quarter,"Story County, Iowa",soybeans,2021,66.8,160,2021-05-20,2021-10-01,no,
+North 80,"Story County, Iowa",corn,2022,226.7,80,2022-05-03,2022-10-15,no,
+River bottom,"Story County, Iowa",soybeans,2022,58.4,40,2022-05-14,2022-09-30,no,
+Home quarter,"Story County, Iowa",corn,2022,223.7,160,2022-04-28,2022-10-24,no,
+North 80,"Story County, Iowa",soybeans,2023,70.9,80,2023-05-21,2023-09-28,no,
+River bottom,"Story County, Iowa",corn,2023,215.3,40,2023-04-26,2023-10-21,no,
+Home quarter,"Story County, Iowa",soybeans,2023,63.4,160,2023-05-18,2023-09-30,no,
+North 80,"Story County, Iowa",corn,2024,232.7,80,2024-04-30,2024-10-21,no,
+River bottom,"Story County, Iowa",soybeans,2024,65.4,40,2024-05-18,2024-10-02,no,
+Home quarter,"Story County, Iowa",corn,2024,218.5,160,2024-05-05,2024-10-18,no,
+North 80,"Story County, Iowa",soybeans,2025,72.1,80,2025-05-15,2025-09-28,no,
+River bottom,"Story County, Iowa",corn,2025,191.9,40,2025-05-05,2025-10-17,no,
+Home quarter,"Story County, Iowa",soybeans,2025,66.0,160,2025-05-21,2025-10-10,no,

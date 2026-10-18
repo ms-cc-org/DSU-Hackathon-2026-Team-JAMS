@@ -1,4 +1,5 @@
 // NOAA storm reports grouped into crop seasons. Counts are reported events, so a zero means none were reported.
+import { LAST_OBSERVED_DAY, LAST_OBSERVED_YEAR, calendarSlot } from './daily';
 import type { County, CropKey, StormEvent } from './types';
 
 export const STORM_TYPES = ['Hail', 'Damaging wind', 'Tornado', 'Flood', 'Other'] as const;
@@ -38,6 +39,13 @@ export function stormSeason(c: County, k: CropKey, year: number): StormSeason {
   const key = `${k}${year}`;
   const hit = byCounty.get(key);
   if (hit) return hit;
+  // Predicted seasons: the county's average storm season (notebooks/Agrigine_2026_2028.ipynb)
+  if (year > LAST_OBSERVED_YEAR) {
+    const m = c.stm?.[k] ?? [0, 0, 0, 0, 0, 0];
+    const s: StormSeason = { byType: m.slice(0, 5), damaging: m[0] + m[1] + m[2] + m[3], cropDamage: m[5] };
+    byCounty.set(key, s);
+    return s;
+  }
   const [from, to] = seasonDays(k, year);
   const s: StormSeason = { byType: [0, 0, 0, 0, 0], damaging: 0, cropDamage: 0 };
   for (const e of c.ev ?? []) {
@@ -51,6 +59,19 @@ export function stormSeason(c: County, k: CropKey, year: number): StormSeason {
 }
 
 /** The individual reports in a crop season, oldest first. */
+const weekly = new WeakMap<County, Float32Array>();
+/** The average number of damaging storm reports in the 7 days up to this calendar date, over 2000-2025. */
+export function typicalWeek(c: County, day: number) {
+  let byDate = weekly.get(c);
+  if (!byDate) {
+    const counts = new Float32Array(366);
+    for (const e of c.ev ?? []) if (e[0] <= LAST_OBSERVED_DAY && DAMAGING.includes(e[1])) counts[calendarSlot(e[0])]++;
+    byDate = new Float32Array(366).map((_, s) => { let n = 0; for (let j = 0; j < 7; j++) n += counts[(s - j + 366) % 366]; return n / 26; });
+    weekly.set(c, byDate);
+  }
+  return byDate[calendarSlot(day)];
+}
+
 export function seasonEvents(c: County, k: CropKey, year: number): StormEvent[] {
   const [from, to] = seasonDays(k, year);
   return (c.ev ?? []).filter(e => e[0] >= from && e[0] <= to);
