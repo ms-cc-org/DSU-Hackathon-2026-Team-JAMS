@@ -4,6 +4,21 @@ An open-source research tool for county farm data that farmers can use too. Agri
 
 Built for the DSU *Data to Harvest* hackathon, October 17–18, 2026.
 
+## Who it is for, and what they decide
+
+**Users:** farmers and gardeners, and environmental researchers.
+
+**Decisions:** a farmer or gardener uses it to plan a season: when it is safe to plant (frost risk by date), how much drought and heat to expect (the chance of severe drought in the next 4 and 8 weeks, the typical weather for any date), what yield a season is heading for as it unfolds, and, with their own records, what their fields are likely to produce. A researcher uses it to compare counties and years across 26 years of crop, drought, weather, soil, satellite, storm and insurance data, build and share reports, and check how each forecast performed on years it never saw.
+
+**Evidence, checked on years not used to build it:** every prediction in the app was tested by predicting 2016–2025 from earlier years only (frost dates: built on 2000–2018, tested on 2019–2025). The scores, splits and parameters are in [BENCHMARKS.md](BENCHMARKS.md) and under *Predictive modeling* below. Where a model did not beat the simple baseline, the app shows the baseline and says so.
+
+**The tool:** a web app, used without reading code.
+- **Use it:** <https://agrigine.pages.dev>. Explore needs no account; Report and Predict ask you to sign in because they save to your account.
+- **Run it locally:** `cd agrigine && npm install && npm run dev`, then open <http://localhost:3000>. Needs Node 20+. All data files are committed, so nothing has to be downloaded or rebuilt.
+- **Rebuild the data and models (optional):** `python3 agrigine/scripts/pull_all.py`, then the three notebooks in `notebooks/` in order (see *How a forecast gets into the app*). Python 3.11+.
+
+The app itself is TypeScript (Next.js); the data pipeline and every model are Python (`agrigine/scripts/`, `notebooks/`), and the notebooks run on their own as Jupyter notebooks.
+
 <details>
 <summary><b>Codebase structure</b> (click to expand)</summary>
 
