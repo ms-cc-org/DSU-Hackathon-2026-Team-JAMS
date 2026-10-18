@@ -372,7 +372,7 @@ No fitted model. Spring risk on day d = share of 2000–2025 years whose last sp
   - The free plan allows up to 20,000 files per deploy and 25 MiB per file. The largest file today is `agrigine.json`, at 6.6 MB.
   - There are no Pages Functions and no server rendering. Pages that need account data, such as Profile and My farm data, load it in the browser after the page opens.
 - **The MCP server: a Cloudflare Worker** (`agrigine/worker/`, deployed with `npm run deploy:mcp`).
-  - AI assistants such as Claude connect to it and call five read-only tools: `find_places`, `get_county_season`, `get_county_history`, `get_daily_weather` and `rank_counties`.
+  - AI assistants such as Claude connect to it and call five read-only tools: `find_places`, `get_county_season`, `get_county_history`, `get_daily_weather` and `rank_counties`. With a personal key made on the Profile page (sent as `Authorization: Bearer agk_…`), three more read that person's own data: `my_farms`, `my_records` and `my_reports`. Only the key's SHA-256 is stored; the Worker checks it through `SECURITY DEFINER` functions in Supabase, so it holds no secrets and keys are read-only.
   - It stores no data of its own. It fetches small JSON files from the Pages site's `/data/api/` folder, which Cloudflare caches. The `DATA_BASE_URL` variable in `worker/wrangler.jsonc` says which site to read from.
   - It speaks MCP over plain HTTP (JSON-RPC, stateless), so it needs no sessions or storage.
   - The free tier allows 100,000 requests a day and 10 ms of CPU per request. That limit is why the data is split into small files.
@@ -396,8 +396,6 @@ No fitted model. Spring risk on day d = share of 2000–2025 years whose last sp
   - The browser code is in `agrigine/lib/supabase.ts` and `agrigine/lib/account.ts`.
 - **Data pipeline: Python** (`agrigine/scripts/`) pulls each source and writes every file described above.
 - **Predictions: Jupyter notebooks** (`notebooks/`) with scikit-learn, pre-run into files the app serves. No model runs in the browser or on a server.
-
-**Planned, not built yet:** MCP tools that read a signed-in farmer's own records.
 
 ### Frontend
 
